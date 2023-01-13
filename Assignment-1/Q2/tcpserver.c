@@ -1,13 +1,3 @@
-/*
-			NETWORK PROGRAMMING WITH SOCKETS
-
-In this program we illustrate the use of Berkeley sockets for interprocess
-communication across the network. We show the communication between a server
-process and a client process.
-
-
-*/
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -17,7 +7,27 @@ process and a client process.
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-			/* THE SERVER PROCESS */
+
+//We implement a resizable string to store the expression as we do not know its length
+struct resizable_string {
+	char *str;
+	int size;
+	int capacity;
+};
+
+void init(struct resizable_string *s) {
+	s->size = 0;
+	s->capacity = 1;
+	s->str = malloc(s->capacity);
+}
+
+void append(struct resizable_string *s, char c) {
+	if (s->size == s->capacity) {
+		s->capacity *= 2;
+		s->str = realloc(s->str, s->capacity);
+	}
+	s->str[s->size++] = c;
+}
 
 int main()
 {
@@ -28,61 +38,23 @@ int main()
 	int i;
 	char buf[100];		/* We will use this buffer for communication */
 
-	/* The following system call opens a socket. The first parameter
-	   indicates the family of the protocol to be followed. For internet
-	   protocols we use AF_INET. For TCP sockets the second parameter
-	   is SOCK_STREAM. The third parameter is set to 0 for user
-	   applications.
-	*/
 	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 		perror("Cannot create socket\n");
 		exit(0);
 	}
 
-	/* The structure "sockaddr_in" is defined in <netinet/in.h> for the
-	   internet family of protocols. This has three main fields. The
- 	   field "sin_family" specifies the family and is therefore AF_INET
-	   for the internet family. The field "sin_addr" specifies the
-	   internet address of the server. This field is set to INADDR_ANY
-	   for machines having a single IP address. The field "sin_port"
-	   specifies the port number of the server.
-	*/
 	serv_addr.sin_family		= AF_INET;
 	serv_addr.sin_addr.s_addr	= INADDR_ANY;
 	serv_addr.sin_port		= htons(20000);
 
-	/* With the information provided in serv_addr, we associate the server
-	   with its port using the bind() system call. 
-	*/
 	if (bind(sockfd, (struct sockaddr *) &serv_addr,
 					sizeof(serv_addr)) < 0) {
 		perror("Unable to bind local address\n");
 		exit(0);
 	}
 
-	listen(sockfd, 5); /* This specifies that up to 5 concurrent client
-			      requests will be queued up while the system is
-			      executing the "accept" system call below.
-			   */
-
-	/* In this program we are illustrating an iterative server -- one
-	   which handles client connections one by one.i.e., no concurrency.
-	   The accept() system call returns a new socket descriptor
-	   which is used for communication with the server. After the
-	   communication is over, the process comes back to wait again on
-	   the original socket descriptor.
-	*/
+	listen(sockfd, 5);
 	while (1) {
-
-		/* The accept() system call accepts a client connection.
-		   It blocks the server until a client request comes.
-
-		   The accept() system call fills up the client's details
-		   in a struct sockaddr which is passed as a parameter.
-		   The length of the structure is noted in clilen. Note
-		   that the new socket descriptor returned by the accept()
-		   system call is stored in "newsockfd".
-		*/
 		clilen = sizeof(cli_addr);
 		newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr,
 					&clilen) ;
@@ -91,27 +63,119 @@ int main()
 			perror("Accept error\n");
 			exit(0);
 		}
+		while(1){
+			//Read the expression from the client
+			recv(newsockfd, buf, 100, 0);
 
+			//If we read -1\0 we exit
+			if(buf[0]=='-' && buf[1]=='1' && buf[2]=='\0'){
+				break;
+			}
 
-		/* We initialize the buffer, copy the message to it,
-			and send the message to the client. 
-		*/
-		
-		strcpy(buf,"Message from server");
-		send(newsockfd, buf, strlen(buf) + 1, 0);
+			//We will store the expression in a resizable string and will keep reading till we encounter a \0
+			struct resizable_string s;
+			init(&s);
+			while(1){
+				int end = 0;
+				for(int i=0; i<100; i++){
+					append(&s, buf[i]);
+					if(buf[i]=='\0'){
+						end = 1;
+						break;
+					}
+				}
+				if(end){
+					break;
+				}
+				recv(newsockfd, buf, 100, 0);
+			}
 
-		/* We now receive a message from the client. For this example
-  		   we make an assumption that the entire message sent from the
-  		   client will come together. In general, this need not be true
-		   for TCP sockets (unlike UDPi sockets), and this program may not
-		   always work (for this example, the chance is very low as the 
-		   message is very short. But in general, there has to be some
-	   	   mechanism for the receiving side to know when the entire message
-		  is received. Look up the return value of recv() to see how you
-		  can do this.
-		*/ 
-		recv(newsockfd, buf, 100, 0);
-		printf("%s\n", buf);
+			//We will now evaluate the expression
+			double ans = 0, ans_bracket=0;
+			char op = '+',  op_bracket='+';
+			int in_bracket = 0;
+			for(int i=0; i<s.size; i++){
+				if(s.str[i]=='('){
+					in_bracket = 1;
+					continue;
+				}
+				if(s.str[i]==')'){
+					in_bracket = 0;
+					if(op=='+'){
+						ans += ans_bracket;
+					}
+					else if(op=='-'){
+						ans -= ans_bracket;
+					}
+					else if(op=='*'){
+						ans *= ans_bracket;
+					}
+					else if(op=='/'){
+						ans /= ans_bracket;
+					}
+					ans_bracket = 0;
+					continue;
+				}
+				if(s.str[i]=='+' || s.str[i]=='-' || s.str[i]=='*' || s.str[i]=='/'){
+					if(in_bracket){
+						op_bracket = s.str[i];
+					}
+					else{
+						op = s.str[i];
+					}
+					continue;
+				}
+				if(s.str[i]=='\0'){
+					break;
+				}
+				double num = 0;
+				if(s.str[i]>='0' && s.str[i]<='9'){
+					num = atof(s.str+i);
+					printf("%lf\n", num);
+					while((s.str[i]>='0' && s.str[i]<='9')||s.str[i]=='.'){
+						i++;
+					}
+					i--;
+				}
+				else{
+					continue;
+				}
+				if(in_bracket){
+					if(op_bracket=='+'){
+						ans_bracket += num;
+					}
+					else if(op_bracket=='-'){
+						ans_bracket -= num;
+					}
+					else if(op_bracket=='*'){
+						ans_bracket *= num;
+					}
+					else if(op_bracket=='/'){
+						ans_bracket /= num;
+					}
+				}
+				else{
+					if(op=='+'){
+						ans += num;
+					}
+					else if(op=='-'){
+						ans -= num;
+					}
+					else if(op=='*'){
+						ans *= num;
+					}
+					else if(op=='/'){
+						ans /= num;
+					}
+				}
+				printf("%c %c\n", op, s.str[i]);
+			}
+
+			//We will now flush the buffer and send the answer to the client
+			memset(buf, 0, 100);
+			sprintf(buf, "%lf", ans);
+			send(newsockfd, buf, 100, 0);
+		}
 
 		close(newsockfd);
 	}
