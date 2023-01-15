@@ -131,7 +131,6 @@ int main()
 				double num = 0;
 				if(s.str[i]>='0' && s.str[i]<='9'){
 					num = atof(s.str+i);
-					printf("%lf\n", num);
 					while((s.str[i]>='0' && s.str[i]<='9')||s.str[i]=='.'){
 						i++;
 					}
@@ -168,7 +167,6 @@ int main()
 						ans /= num;
 					}
 				}
-				printf("%c %c\n", op, s.str[i]);
 			}
 
 			//We will now flush the buffer and send the answer to the client
