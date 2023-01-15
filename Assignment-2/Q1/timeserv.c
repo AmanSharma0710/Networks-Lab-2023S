@@ -1,57 +1,55 @@
-// A Simple Client Implementation
 #include <stdio.h> 
 #include <stdlib.h> 
 #include <unistd.h> 
 #include <string.h> 
-#include <poll.h>
+#include <time.h>
 #include <sys/types.h> 
 #include <sys/socket.h> 
 #include <arpa/inet.h> 
 #include <netinet/in.h> 
   
-int main() { 
-    int sockfd; 
-    struct sockaddr_in servaddr; 
+#define MAXLINE 1024 
   
-    // Creating socket file descriptor 
+int main() { 
+    int sockfd, n; 
+    socklen_t len;
+    char buffer[MAXLINE]; 
+    struct sockaddr_in servaddr, cliaddr; 
+      
+    // Create socket file descriptor 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if ( sockfd < 0 ) { 
         perror("socket creation failed"); 
         exit(EXIT_FAILURE); 
     } 
-  
-    memset(&servaddr, 0, sizeof(servaddr)); 
       
-    // Server information 
-    servaddr.sin_family = AF_INET; 
+    memset(&servaddr, 0, sizeof(servaddr)); 
+    memset(&cliaddr, 0, sizeof(cliaddr)); 
+      
+    servaddr.sin_family    = AF_INET; 
+    servaddr.sin_addr.s_addr = INADDR_ANY; 
     servaddr.sin_port = htons(8181); 
-    inet_aton("127.0.0.1", &servaddr.sin_addr); 
+      
+    // Bind the socket with the server address 
+    if ( bind(sockfd, (const struct sockaddr *)&servaddr,  
+            sizeof(servaddr)) < 0 ) 
+    { 
+        perror("bind failed"); 
+        exit(EXIT_FAILURE); 
+    } 
     
-    int n, response_received = 0;
-    socklen_t len; 
-    char *hello = "Send time and date pls ;)"; 
-    char buffer[1024];
-    memset(buffer, 0, sizeof(buffer)); 
-    struct pollfd poll_set[1];
-    poll_set[0].fd = sockfd;
-    poll_set[0].events = POLLIN;
-    //We wait for 3 seconds for the result, else we try again
-    //If even after 5 times we don't get a response we say timed out and exit with failure
-    for(int i=0; i<5; i++){
-        sendto(sockfd, (const char *)hello, strlen(hello), 0, 
-                (const struct sockaddr *) &servaddr, sizeof(servaddr)); 
-        int poll_result = poll(poll_set, 1, 3000);
-        if(poll_result > 0){
-            response_received = 1;
-            break;
-        }
+    printf("\nServer Running....\n");
+    while(1){
+        len = sizeof(cliaddr);
+        n = recvfrom(sockfd, (char *)buffer, MAXLINE, 0, 
+                ( struct sockaddr *) &cliaddr, &len); 
+        memset(buffer, 0, sizeof(buffer));
+        time_t t = time(NULL);
+		struct tm tm = *localtime(&t);
+		sprintf(buffer, "Current server date and time is: %d-%d-%d %d:%d:%d", tm.tm_mday, tm.tm_mon + 1, tm.tm_year + 1900, tm.tm_hour, tm.tm_min, tm.tm_sec);
+        sendto(sockfd, (const char *)buffer, strlen(buffer), 0, 
+                (const struct sockaddr *) &cliaddr, len); 
     }
-    if(!response_received){
-        printf("Timeout Exceeded\n");
-        exit(EXIT_FAILURE);
-    }
-    n = recvfrom(sockfd, (char *)buffer, 1024, 0, ( struct sockaddr *) &servaddr, &len);
-    printf("%s\n", buffer);
-    close(sockfd); 
+    close(sockfd);
     return 0; 
 } 
