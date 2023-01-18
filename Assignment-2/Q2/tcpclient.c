@@ -12,8 +12,12 @@
 #include <arpa/inet.h>
 
 void send_in_packets(int sockfd, char *data, size_t data_len){
-	if(data_len == 0) return;
-	printf("Sending: %s\n", data);
+	if(data_len == 0){
+		// printf("Sending: (empty string)\n");
+		send(sockfd, "", 1, 0);
+		return;
+	}
+	// printf("Sending: %s\n", data);
 	size_t packet_len = 50;
 	char *packet = (char *)malloc(packet_len*sizeof(char));
 	int sent = 0;
@@ -106,10 +110,20 @@ int main()
 		input_length = strlen(input);
 		input[--input_length] = '\0';	//Remove the newline character from the input
 		send_in_packets(sockfd, input, input_length);
-		printf("%s\n", input);
+		// printf("User entered:%s.\n", input);
+
+		//Strip whitespace from the input to check if the user entered exit
+		char *stripped_input = (char *)malloc(input_length*sizeof(char));
+		int j=0;
+		for(i=0; i<input_length; i++){
+			if(input[i] != ' '){
+				stripped_input[j++] = input[i];
+			}
+		}
+		stripped_input[j] = '\0';
 
 		//If the user enters exit, close the socket and exit without waiting for a response from the server
-		if(strcmp(input, "exit") == 0){
+		if(strcmp(stripped_input, "exit") == 0){
 			close(sockfd);
 			exit(0);
 		}

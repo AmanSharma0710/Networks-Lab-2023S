@@ -9,10 +9,12 @@
 #include <arpa/inet.h>
 
 void send_in_packets(int sockfd, char *data, size_t data_len){
+	// printf("Sending: %s\n", data);
+	// printf("data_len: %d\n", data_len);
 	size_t packet_len = 50;
 	char *packet = (char *)malloc(packet_len*sizeof(char));
 	int sent = 0;
-	while(sent < data_len){
+	while(sent < data_len+1){	// +1 for the null terminator
 		int i;
 		for(i=0; i<packet_len; i++){
 			if(i+sent < data_len){
@@ -81,6 +83,8 @@ int main(){
 			//We now check the username against usernames stored in a file
 			FILE *fp;
 			fp = fopen("users.txt", "r");
+			//users.txt contains a list of usernames
+			//Each username is on a new line, followed by a newline character
 			char line[50];
 			int found = 0;
 			while(fgets(line, 50, fp) != NULL){
@@ -139,10 +143,10 @@ int main(){
 					token_count++;
 					token = strtok(NULL, " ");
 				}
-				printf("Token count: %d\n", token_count);
-				for(int i=0; i<token_count; i++){
-					printf("Token %d: %s\n", i, tokens[i]);
-				}
+				// printf("Token count: %d\n", token_count);
+				// for(int i=0; i<token_count; i++){
+				// 	printf("Token %d: %s\n", i, tokens[i]);
+				// }
 				//Clear the local_buffer
 				for(i=0; i<1024; i++) local_buffer[i] = '\0';
 
@@ -160,15 +164,18 @@ int main(){
 					break;	//Exit the loop
 				}
 				if((strcmp(tokens[0], "pwd") == 0)&&(token_count == 1)){
-					printf("Executing pwd command\n");	
+					// printf("Executing pwd command\n");	
 					if(getcwd(local_buffer, len) == NULL){	//If we get an error
+						// printf("Error in pwd command\n");
 						strcpy(buf, "####");
 						send(newsockfd, buf, strlen(buf) + 1, 0);
 					}
 					else{	//If we get a valid response
+						// printf("pwd command executed successfully\n");
+						// printf("Response: %s.\n", local_buffer);
 						send_in_packets(newsockfd, local_buffer, strlen(local_buffer));
 					}
-					printf("Done executing pwd command\n");
+					// printf("Done executing pwd command\n");
 					free(tokens);
 					free(local_buffer);
 					continue;
