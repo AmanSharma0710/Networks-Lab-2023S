@@ -12,22 +12,21 @@
 #include <arpa/inet.h>
 
 void send_in_packets(int sockfd, char *data, size_t data_len){
-	if(data_len == 0){
-		// printf("Sending: (empty string)\n");
-		send(sockfd, "", 1, 0);
-		return;
-	}
-	// printf("Sending: %s\n", data);
 	size_t packet_len = 50;
 	char *packet = (char *)malloc(packet_len*sizeof(char));
 	int sent = 0;
-	while(sent < data_len){
+	while(sent < data_len + 1){	// +1 for the null terminator
 		int i;
 		for(i=0; i<packet_len; i++){
 			if(i+sent < data_len){
 				packet[i] = data[i+sent];
-			}else{
+			}
+			else if(i+sent == data_len){
 				packet[i] = '\0';
+				packet_len = i+1;
+			}
+			else{
+				break;
 			}
 		}
 		send(sockfd, packet, packet_len, 0);
@@ -76,8 +75,8 @@ int main()
 		close(sockfd);
 		exit(0);
 	}
-	//Copy the input into the buffer, padding with \0 if the input is less than 50 bytes
-	for(i=0; i<buf_len; i++){
+	//Copy the input into the buffer, replacing the newline character with a null character
+	for(i=0; i<input_length; i++){
 		if(i<input_length-1){
 			buf[i] = input[i];
 		}else{

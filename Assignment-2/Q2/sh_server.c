@@ -9,18 +9,21 @@
 #include <arpa/inet.h>
 
 void send_in_packets(int sockfd, char *data, size_t data_len){
-	// printf("Sending: %s\n", data);
-	// printf("data_len: %d\n", data_len);
 	size_t packet_len = 50;
 	char *packet = (char *)malloc(packet_len*sizeof(char));
 	int sent = 0;
-	while(sent < data_len+1){	// +1 for the null terminator
+	while(sent < data_len + 1){	// +1 for the null terminator
 		int i;
 		for(i=0; i<packet_len; i++){
 			if(i+sent < data_len){
 				packet[i] = data[i+sent];
-			}else{
+			}
+			else if(i+sent == data_len){
 				packet[i] = '\0';
+				packet_len = i+1;
+			}
+			else{
+				break;
 			}
 		}
 		send(sockfd, packet, packet_len, 0);
@@ -143,10 +146,6 @@ int main(){
 					token_count++;
 					token = strtok(NULL, " ");
 				}
-				// printf("Token count: %d\n", token_count);
-				// for(int i=0; i<token_count; i++){
-				// 	printf("Token %d: %s\n", i, tokens[i]);
-				// }
 				//Clear the local_buffer
 				for(i=0; i<1024; i++) local_buffer[i] = '\0';
 
@@ -160,26 +159,28 @@ int main(){
 				}
 
 				//Execute the command
+
+				//If the command is "exit", we exit the loop
 				if((strcmp(tokens[0], "exit") == 0)&&(token_count == 1)){
 					break;	//Exit the loop
 				}
+
+				//If the command is "pwd", we return the current working directory
 				if((strcmp(tokens[0], "pwd") == 0)&&(token_count == 1)){
-					// printf("Executing pwd command\n");	
 					if(getcwd(local_buffer, len) == NULL){	//If we get an error
-						// printf("Error in pwd command\n");
 						strcpy(buf, "####");
 						send(newsockfd, buf, strlen(buf) + 1, 0);
 					}
 					else{	//If we get a valid response
-						// printf("pwd command executed successfully\n");
-						// printf("Response: %s.\n", local_buffer);
 						send_in_packets(newsockfd, local_buffer, strlen(local_buffer));
 					}
-					// printf("Done executing pwd command\n");
 					free(tokens);
 					free(local_buffer);
 					continue;
 				}
+
+				//If the command is "dir", we return the contents of the current directory if token_count is 1
+				//If token_count is 2, we return the contents of the directory specified by the second token
 				if((strcmp(tokens[0], "dir") == 0)&&(token_count == 1 || token_count == 2)){
 					DIR *d;
 					struct dirent *dir;
@@ -190,14 +191,14 @@ int main(){
 						d = opendir(".");
 					}
 					if(d){
-						while((dir = readdir(d)) != NULL){
+						while((dir = readdir(d)) != NULL){	//We read the directory and add the contents to local_buffer
 							strcat(local_buffer, dir->d_name);
 							strcat(local_buffer, "\t");
 						}
 						closedir(d);
-						send_in_packets(newsockfd, local_buffer, strlen(local_buffer));
+						send_in_packets(newsockfd, local_buffer, strlen(local_buffer));	//We send the contents of local_buffer
 					}
-					else{
+					else{	//If the directory could not be opened, we return an error executing command
 						strcpy(buf, "####");
 						send(newsockfd, buf, strlen(buf) + 1, 0);
 					}
@@ -205,18 +206,30 @@ int main(){
 					free(local_buffer);
 					continue;
 				}
+
+				//If the command is "cd", we change the current working directory
+				//If token_count is 1, we change the current working directory to the path specified by the HOME environment variable
+				//If token_count is 2, we change the current working directory to the path specified by the second token
 				if((strcmp(tokens[0], "cd") == 0)&&(token_count == 1 || token_count == 2)){
-					if(token_count == 1 || strcmp(tokens[1], "~") == 0){
+					if(token_count == 1 || strcmp(tokens[1], "~") == 0){	//If the second token is "~", we change the current working directory to the path specified by the HOME environment variable
 						if(tokens[1] == NULL)
 							tokens[1] = (char *)malloc(200*sizeof(char));
 						strcpy(tokens[1], "~/");
 					}
-					if(tokens[1][0] == '~'){
+					if(tokens[1][0] == '~'){	//If the second token starts with "~", we change the cwd to the path specified by the HOME environment variable
 						char *home = getenv("HOME");
 						char *temp = (char *)malloc(200*sizeof(char));
 						strcpy(temp, home);
 						strcat(temp, tokens[1] + 1);
-						strcpy(tokens[1], temp);	//Buffer overflow?
+						strcpy(tokens[1], temp);
+						//Check for buffer overflow
+						if(strlen(tokens[1]) > 200){
+							strcpy(buf, "####");
+							send(newsockfd, buf, strlen(buf) + 1, 0);
+							free(tokens);
+							free(local_buffer);
+							continue;
+						}
 						free(temp);
 					}
 					if(chdir(tokens[1]) == -1){	//If we get an error
@@ -244,5 +257,3 @@ int main(){
 	}
 	return 0;
 }
-			
-
