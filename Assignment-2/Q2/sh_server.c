@@ -32,6 +32,42 @@ void send_in_packets(int sockfd, char *data, size_t data_len){
 	free(packet);
 }
 
+//We will receive data in packets of 50 bytes until
+//we get a null character or buffer fills up
+//Returns the number of bytes received including the null character
+//Returns -1 if buffer fills up
+int recv_in_packets(int sockfd, char *buffer, size_t buffer_len){
+	size_t packet_len = 50;
+	char *packet = (char *)malloc(packet_len*sizeof(char));
+	int received = 0;
+	while(received < buffer_len){
+		for(int i=0; i<packet_len; i++) packet[i] = '\0';
+		recv(sockfd, packet, packet_len, 0);
+		int i;
+		for(i=0; i<packet_len; i++){
+			if(i+received < buffer_len){
+				buffer[i+received] = packet[i];
+			}
+			else{
+				break;
+			}
+			if(packet[i] == '\0'){
+				packet_len = i+1;
+				break;
+			}
+		}
+		received += packet_len;
+		if(i<packet_len && packet[i] == '\0'){
+			break;
+		}
+	}
+	if(received>buffer_len || buffer[received-1] != '\0'){
+		received = -1;
+	}
+	free(packet);
+	return received;
+}
+
 
 int main(){
 	int			sockfd, newsockfd ; /* Socket descriptors */
@@ -80,8 +116,7 @@ int main(){
 			/* We again initialize the buffer, and receive a 
 			   message from the client. 
 			*/
-			for(i=0; i < 50; i++) buf[i] = '\0';
-			recv(newsockfd, buf, 50, 0);
+			recv_in_packets(newsockfd, buf, 50);
 
 			//We now check the username against usernames stored in a file
 			FILE *fp;
@@ -116,23 +151,9 @@ int main(){
 				size_t len = 1024;
 				char *local_buffer = (char *)malloc(len*sizeof(char));
 
-				//Keep receiving until we get a null character, and add them to local_buffer
-				int response_end = 0, local_buffer_filled=0;
-				while(response_end == 0){
-					recv(newsockfd, buf, 50, 0);
-					for(i=0; i < 50; i++){
-						local_buffer[local_buffer_filled++] = buf[i];
-						if(local_buffer_filled == len){
-							printf("Buffer overflow\n");
-							exit(0);
-						}
-						if(buf[i] == '\0'){
-							response_end = 1;
-							break;
-						}
-						buf[i] = '\0';
-					}
-				}
+				//We will receive the command in packets of 50 bytes
+				recv_in_packets(newsockfd, local_buffer, len);
+
 				//Tokenize the command
 				char* token = strtok(local_buffer, " ");
 				char **tokens = (char **)malloc(3*sizeof(char *));
