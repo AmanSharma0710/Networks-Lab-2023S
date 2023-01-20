@@ -45,8 +45,15 @@ int recv_in_packets(int sockfd, char *buffer, size_t buffer_len){
 	char *packet = (char *)malloc(packet_len*sizeof(char));
 	int received = 0;
 	while(received < buffer_len){
+		packet_len = 50;
 		for(int i=0; i<packet_len; i++) packet[i] = '\0';
-		recv(sockfd, packet, packet_len, 0);
+		packet_len = recv(sockfd, packet, packet_len, 0);
+		if(packet_len < 0){
+			printf("Error in receiving response from server\n");
+			close(sockfd);
+			exit(0);
+		}
+		// printf("Received packet of length %d on client\n", packet_len);
 		int i;
 		for(i=0; i<packet_len; i++){
 			if(i+received < buffer_len){
