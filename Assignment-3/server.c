@@ -102,26 +102,26 @@ int main(int argc, char *argv[])
 	/* With the information provided in serv_addr, we associate the server
 	   with its port using the bind() system call. 
 	*/
-	if (bind(sockfd, (struct sockaddr *) &serv_addr,
-					sizeof(serv_addr)) < 0) {
+	if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
 		perror("Unable to bind local address\n");
 		exit(0);
 	}
 
 	listen(sockfd, 5);
 
+	srand(port);
+
 	
 	while (1) {
 		clilen = sizeof(cli_addr);
-		newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr,
-					&clilen) ;
+		newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen) ;
 
 		if (newsockfd < 0) {
 			perror("Accept error\n");
 			exit(0);
 		}
 
-		//If we are here, it means that a client has connected to the server
+		//If we are here, it means that the load balancer has connected to the server
         //Receive the message from the load balancer
         int received = recv_in_packets(newsockfd, buf, buffer_len);
         if(received < 0){
@@ -131,7 +131,7 @@ int main(int argc, char *argv[])
         }
         if(strcmp(buf, "Send Load") == 0){
             int load = rand()%100 + 1;
-            sprintf(buf, "%d\0", load);
+            sprintf(buf, "%d", load);
             printf("Load sent: %d\n", load);
 
             //Send the load to the load balancer
@@ -147,7 +147,8 @@ int main(int argc, char *argv[])
                 send_in_packets(newsockfd, buf, strlen(buf));
             }
             else{
-                printf("Invalid message from load balancer\n");
+                strcpy(buf, "Invalid message received from load balancer\n");
+				send_in_packets(newsockfd, buf, strlen(buf));
             }
         }
 		close(newsockfd);

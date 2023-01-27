@@ -46,13 +46,18 @@ int recv_in_packets(int sockfd, char *buffer, size_t buffer_len){
 	return received;
 }
 
-int main(){
+int main(int argc, char *argv[]){
 	int			sockfd ;
 	struct sockaddr_in	serv_addr;
 
 	int i;
 	size_t len = 100;
 	char *buf = (char *)malloc(len*sizeof(char));
+	int port = atoi(argv[1]);
+	if(port < 0 || port > 65535){
+		printf("Invalid port number\n");
+		exit(0);
+	}
 
 	/* We create the socket and verify its creation */
 	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
@@ -63,7 +68,7 @@ int main(){
 	/* We specify the address of the server to which we want to connect */
 	serv_addr.sin_family	= AF_INET;
 	inet_aton("127.0.0.1", &serv_addr.sin_addr);
-	serv_addr.sin_port	= htons(20000);
+	serv_addr.sin_port	= htons(port);
 	if ((connect(sockfd, (struct sockaddr *) &serv_addr,
 						sizeof(serv_addr))) < 0) {
 		perror("Unable to connect to server\n");
