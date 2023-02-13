@@ -8,6 +8,7 @@
 #include<sys/socket.h>
 #include <arpa/inet.h>
 #include<netinet/in.h>
+#include<ctype.h>
 
 #define SERV_PORT 80
 #define MAXLEN 1000
@@ -34,6 +35,13 @@ void insert_into_string(dynamic_string* ds, char c){
     }
     ds->data[ds->len] = c;
     ds->data[ds->len+1] = '\0';
+}
+
+void insert_mess_into_string(dynamic_string* ds, char* mess){
+    int len = strlen(mess);
+    for(int i=0; i<len; i++){
+        insert_into_string(ds, mess[i]);
+    }
 }
 
 void delete_string(dynamic_string* ds){
@@ -287,47 +295,48 @@ int Connect(Request* request){
 void Process_GET(Request* request){
     // opens tcp connection with the http server
     int sockfd = Connect(request);
-
+    printf("Connected to server\n");
     // download/retrieve the document from the http server
-    char* req;
-    sprintf(req,"GET %s HTTP/1.1\r\nHost: %s\r\n", request->file_path, request->serv_ip);
+    dynamic_string* req = create_dynamic_string();
+    char* temp = (char*)malloc(sizeof(char)*MAXLEN);
+    sprintf(temp,"GET %s HTTP/1.1\r\nHost: %s\r\n", request->file_path, request->serv_ip);
     
+    insert_mess_into_string(req, temp);
     // connection
-    strcat(req,"Connection: close\r\n");
+    insert_mess_into_string(req,"Connection: close\r\n");
     
     // date 
     time_t tnull = time(NULL);
     struct tm* local;
     local = localtime(&tnull);
     char *tme = asctime(local);
-    strcat(req,"Date: ");
-    strcat(req,tme);
-    strcat(req,"\r\n");
+    insert_mess_into_string(req,"Date: ");
+    insert_mess_into_string(req,tme);
+    insert_mess_into_string(req,"\r\n");
 
     // accept
-    strcat(req,"Accept: ");
-    strcat(req,get_mime_type(request->file_path));
-    strcat(req,"\r\n");
+    insert_mess_into_string(req,"Accept: ");
+    insert_mess_into_string(req,get_mime_type(request->file_path));
+    insert_mess_into_string(req,"\r\n");
     
     // Accept-Language: en-us preferred, otherwise just English
-    // TODO: just english how to manage
-    strcat(req,"Accept-Language: en-us\r\n");
+    insert_mess_into_string(req,"Accept-Language: en-us, en\r\n");
 
     // if-modified since
-    strcat(req, "If-Modified-Since: ");
+    insert_mess_into_string(req, "If-Modified-Since: ");
     // get current time - 2 days
     local->tm_mday -= 2;
     mktime(local);
     char *time2= asctime(local);
-    strcat(req,time2);
-    strcat(req,"\r\n");
+    insert_mess_into_string(req,time2);
+    insert_mess_into_string(req,"\r\n");
 
     // end of headers
-    strcat(req,"\r\n");
+    insert_mess_into_string(req,"\r\n");
 
     // send the request to the server
-    printf("%s\n",req);
-    send_in_packets(sockfd, req, strlen(req));
+    printf("Request:\n%s\n",req->data);
+    send_in_packets(sockfd, req->data, req->len);
     
     // receive the response from the server
     // we also add a timeout of 3 seconds. If we dont receive the data within
@@ -337,7 +346,7 @@ void Process_GET(Request* request){
     struct pollfd fds[1];
     fds[0].fd = sockfd;
     fds[0].events = POLLIN;
-    int ret = poll(&fds, 1, 3000);
+    int ret = poll(fds, 1, 3000);
 
     if (ret < 0){
         printf("Error in polling\n");
@@ -352,18 +361,18 @@ void Process_GET(Request* request){
             response = create_dynamic_string();
             receive_headers(sockfd,response);
 
-            content_len = get_content_length(response);
-            // TODO: parse the headers to get all headers and values in a map
-
+            content_len = get_content_length(response->data);
+            // We can parse the headers here but since we are not using all of them
+            // we have only parsed the content length
             content = create_dynamic_string();
             receive_content(sockfd, content, content_len);
         }
     } 
     // close the connection
     close(sockfd);
-
+    free(temp);
     // we get the status code from the response
-    char* temp = strtok(response->data, " ");
+    temp = strtok(response->data, " ");
     temp = strtok(NULL, " ");
     int status_code = atoi(temp);
 
@@ -402,7 +411,7 @@ void Process_GET(Request* request){
     }
 
     // get the content type header from the response
-    char* content_type = get_content_type(response);
+    char* content_type = get_content_type(response->data);
 
     int pid = fork();
     if (pid == 0){
@@ -434,24 +443,116 @@ void Process_PUT(Request* request){
     int sockfd = Connect(request);
 
     // upload the document to the http server
-    char* req;
-    sprintf(req,"PUT %s HTTP/1.1\r\nHost: %s\r\n", request->file_path, request->serv_ip);
-    
+    dynamic_string* req = create_dynamic_string();
+    char* temp = (char*)malloc(sizeof(char)*MAXLEN);
+    sprintf(temp,"PUT %s HTTP/1.1\r\nHost: %s\r\n", request->file_path, request->serv_ip);
+    insert_mess_into_string(req, temp);
+
     // connection
-    strcat(req,"Connection: close\r\n");
+    insert_mess_into_string(req,"Connection: close\r\n");
     
     // date 
     time_t tnull = time(NULL);
     struct tm* local;
     local = localtime(&tnull);
     char *tme = asctime(local);
-    strcat(req,"Date: ");
-    strcat(req,tme);
-    strcat(req,"\r\n");
+    insert_mess_into_string(req,"Date: ");
+    insert_mess_into_string(req,tme);
+    insert_mess_into_string(req,"\r\n");
 
     // accept
+    insert_mess_into_string(req,"Accept: ");
+    insert_mess_into_string(req,get_mime_type(request->file_path));
+    insert_mess_into_string(req,"\r\n");
+
+    // Accept-Language: en-us preferred, otherwise just English
+    insert_mess_into_string(req,"Accept-Language: en-us, en\r\n");
+
+    // if-modified-since
+    insert_mess_into_string(req, "If-Modified-Since: ");
+    // get current time - 2 days
+    local->tm_mday -= 2;
+    mktime(local);
+    char *time2= asctime(local);
+    insert_mess_into_string(req,time2);
+    insert_mess_into_string(req,"\r\n");
+
+    // content-language
+    insert_mess_into_string(req,"Content-Language: en-us\r\n");
+
+    // read the file and get the content length
+    FILE* fptr = fopen(request->file_name,"r");
+    if (fptr == NULL){
+        printf("Error in opening file\n");
+        exit(1);
+    }
+    fseek(fptr, 0, SEEK_END);
+    int content_len = ftell(fptr);
+    fseek(fptr, 0, SEEK_SET);
+    fclose(fptr);
+
+    // content-length
+    insert_mess_into_string(req,"Content-Length: ");
+    free(temp);
+    temp = (char*)malloc(sizeof(char)*MAXLEN);
+    sprintf(temp,"%d\r\n",content_len);
+    insert_mess_into_string(req,temp);
     
-    
+    // content-type
+    insert_mess_into_string(req,"Content-Type: ");
+    insert_mess_into_string(req,get_mime_type(request->file_path));
+    insert_mess_into_string(req,"\r\n");
+
+    // end of headers
+    insert_mess_into_string(req,"\r\n");
+
+    // read the file and get the content
+    fptr = fopen(request->file_name,"r");
+    if (fptr == NULL){
+        printf("Error in opening file\n");
+        exit(1);
+    }
+    char* content = (char*)malloc(content_len*sizeof(char));
+    fread(content,1,content_len,fptr);
+    fclose(fptr);
+
+    // add the content to the request
+    insert_mess_into_string(req,content);
+
+    // send the request in packets
+    printf("Request:\n%s\n",req->data);
+    send_in_packets(sockfd,req->data,req->len);
+
+    // receive the response
+    dynamic_string* response = create_dynamic_string();
+    // receive the headers
+    receive_headers(sockfd,response);
+
+    close(sockfd);
+
+    free(temp);
+
+    // get the status code
+
+    temp = strtok(response->data, " ");
+    temp = strtok(NULL, " ");
+    int status_code = atoi(temp);
+
+    if (status_code != 200){
+        if (status_code == 404){
+            printf("Error 404: File not found\n");
+        }
+        else if (status_code == 400){
+            printf("Error 400: Bad request\n");
+        }
+        else if (status_code == 403){
+            printf("Error 403: Forbidden\n");
+        }
+        else {
+            printf("Error %d: Unknown error\n", status_code);
+        }
+        return;
+    }    
 }
 
 int main(){
