@@ -48,13 +48,41 @@ void empty_string(dynamic_string* ds){
     ds->len = 0;
 }
 
+char *str_tolower(char *str){
+    char *p = str;
+    while (*p) {
+        *p = tolower(*p);
+        p++;
+    }
+    return str;
+}
+
+char* get_mime_type(char* filename){
+    char* ext = strrchr(filename, '.');
+    if (ext == NULL) {
+        return "text/*";
+    }
+    ext++;
+    ext = str_tolower(ext);
+    if (strcmp(ext, "html") == 0) {
+        return "text/html";
+    }
+    if(strcmp(ext, "pdf") == 0){
+        return "application/pdf";
+    }
+    if(strcmp(ext, "jpg") == 0){
+        return "image/jpeg";
+    }
+    return "text/*";
+}
+
 typedef struct { 
     char* method;
     char* url;
     char* file_path;
     char* serv_ip;
     int serv_port;
-    char* file_name;
+    char* file_name; // for PUT request
 } Request;
 
 Request* CreateReq(){
@@ -142,6 +170,32 @@ void receive_content(int sockfd, dynamic_string* ds, int content_len){
     }
 }
 
+// find the content length from the header
+int get_content_length(char* headers){
+    char* content_length = strstr(headers, "Content-Length: ");
+    if(content_length == NULL) return -1;
+    content_length += 16;
+    int len = 0;
+    while(*content_length != '\r'){
+        len = len*10 + (*content_length - '0');
+        content_length++;
+    }
+    return len;
+}
+
+char* get_content_type(char* headers){
+    char* content_type = strstr(headers, "Content-Type: ");
+    if(content_type == NULL) return NULL;
+    content_type += 14;
+    char* type = (char*)malloc(sizeof(char)*MAXLEN);
+    int i = 0;
+    while(*content_type != '\r'){
+        type[i++] = *content_type;
+        content_type++;
+    }
+    type[i] = '\0';
+    return type;
+}
 
 int parse_request(char* command, Request* request){
     // printf("command: %s\n", command);
@@ -251,8 +305,10 @@ void Process_GET(Request* request){
     strcat(req,"\r\n");
 
     // accept
-    // TODO: extension function
-
+    strcat(req,"Accept: ");
+    strcat(req,get_mime_type(request->file_path));
+    strcat(req,"\r\n");
+    
     // Accept-Language: en-us preferred, otherwise just English
     // TODO: just english how to manage
     strcat(req,"Accept-Language: en-us\r\n");
@@ -276,20 +332,127 @@ void Process_GET(Request* request){
     // receive the response from the server
     // we also add a timeout of 3 seconds. If we dont receive the data within
     // the timeout we close the connection and print the timeout message
+    int content_len;
+    dynamic_string* content, response;
+    struct poll_fd fds;
+    fds.fd = sockfd;
+    fds.events = POLLIN;
+    int ret = poll(&fds, 1, 3000);
 
+    if (ret < 0){
+        printf("Error in polling\n");
+        return;
+    }
+    else if (ret == 0){
+        printf("Timeout\n");
+        return;
+    }
+    else{
+        if (fds.revents & POLLIN){
+            response = create_dynamic_string();
+            receive_headers(sockfd,response);
 
-    // open the received file
+            content_len = get_content_length(response);
+            // TODO: parse the headers to get all headers and values in a map
 
-    // close the connection 
+            content = create_dynamic_string();
+            receive_content(sockfd, content, content_len);
+        }
+    } 
+    // close the connection
     close(sockfd);
+
+    // we get the status code from the response
+    char* temp = strtok(response->str, " ");
+    temp = strtok(NULL, " ");
+    int status_code = atoi(temp);
+
+    if (status_code != 200){
+        if (status_code == 404){
+            printf("Error 404: File not found\n");
+        }
+        else if (status_code == 400){
+            printf("Error 400: Bad request\n");
+        }
+        else if (status_code == 403){
+            printf("Error 403: Forbidden\n");
+        }
+        else {
+            printf("Error %d: Unknown error\n", status_code);
+        }
+        return;
+    }
+    
+    // get the name of the file from the request->file_path
+    // get the last token splitting request->file_path with delim = /
+    char* filename = strrchr(request->file_path, '/');
+    if (filename != NULL) filename = filename + 1;
+    else{
+        printf("Error in file_path\n");
+        exit(1);
+    }
+    FILE* fptr = fopen(filename,"w");
+    if (fptr == NULL){
+        printf("Error in opening file\n");
+        exit(1);
+    }
+    // now we write to the file 
+    for(int i=0;i<content->len;i++){
+        fputc(content->str[i],fptr);
+    }
+
+    // get the content type header from the response
+    char* content_type = get_content_type(response);
+
+    int pid = fork();
+    if (pid == 0){
+        // child process
+        // the file should be opened in the application according to the following legend:
+        // .html -> chrome
+        // .pdf -> adobe acrobat
+        // .jpeg -> gimp
+        // any other -> gedit
+        if (strcmp(content_type, "text/html") == 0){
+            execlp("google-chrome", "google-chrome", filename, NULL);
+        }
+        else if (strcmp(content_type, "application/pdf") == 0){
+            execlp("acroread", "acroread", filename, NULL);
+        }
+        else if (strcmp(content_type, "image/jpeg") == 0){
+            execlp("gimp", "gimp", filename, NULL);
+        }
+        else{
+            execlp("gedit", "gedit", filename, NULL);
+        }
+
+    }
+    return;
 }
 
 void Process_PUT(Request* request){
+    // opens tcp connection with the http server
+    int sockfd = Connect(request);
+
+    // upload the document to the http server
+    char* req;
+    sprintf(req,"PUT %s HTTP/1.1\r\nHost: %s\r\n", request->file_path, request->serv_ip);
+    
+    // connection
+    strcat(req,"Connection: close\r\n");
+    
+    // date 
+    time_t tnull = time(NULL);
+    struct tm* local;
+    local = localtime(&tnull);
+    char *tme = asctime(local);
+    strcat(req,"Date: ");
+    strcat(req,tme);
+    strcat(req,"\r\n");
+
+    // accept
     
     
 }
-
-
 
 int main(){
     while(1){
