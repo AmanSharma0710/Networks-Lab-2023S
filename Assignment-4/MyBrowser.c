@@ -333,10 +333,10 @@ void Process_GET(Request* request){
     // we also add a timeout of 3 seconds. If we dont receive the data within
     // the timeout we close the connection and print the timeout message
     int content_len;
-    dynamic_string* content, response;
-    struct poll_fd fds;
-    fds.fd = sockfd;
-    fds.events = POLLIN;
+    dynamic_string* content, *response;
+    struct pollfd fds[1];
+    fds[0].fd = sockfd;
+    fds[0].events = POLLIN;
     int ret = poll(&fds, 1, 3000);
 
     if (ret < 0){
@@ -348,7 +348,7 @@ void Process_GET(Request* request){
         return;
     }
     else{
-        if (fds.revents & POLLIN){
+        if (fds[0].revents & POLLIN){
             response = create_dynamic_string();
             receive_headers(sockfd,response);
 
@@ -363,7 +363,7 @@ void Process_GET(Request* request){
     close(sockfd);
 
     // we get the status code from the response
-    char* temp = strtok(response->str, " ");
+    char* temp = strtok(response->data, " ");
     temp = strtok(NULL, " ");
     int status_code = atoi(temp);
 
@@ -398,7 +398,7 @@ void Process_GET(Request* request){
     }
     // now we write to the file 
     for(int i=0;i<content->len;i++){
-        fputc(content->str[i],fptr);
+        fputc(content->data[i],fptr);
     }
 
     // get the content type header from the response
