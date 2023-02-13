@@ -33,8 +33,8 @@ void insert_into_string(dynamic_string* ds, char c){
         ds->data = (char *)realloc(ds->data, ds->size*2);
         ds->size *= 2;
     }
-    ds->data[ds->len] = c;
-    ds->data[ds->len+1] = '\0';
+    ds->data[ds->len++] = c;
+    ds->data[ds->len] = '\0';
 }
 
 void insert_mess_into_string(dynamic_string* ds, char* mess){
@@ -197,7 +197,7 @@ char* get_content_type(char* headers){
     content_type += 14;
     char* type = (char*)malloc(sizeof(char)*MAXLEN);
     int i = 0;
-    while(*content_type != '\r'){
+    while(*content_type != '\r' && *content_type != ';'){
         type[i++] = *content_type;
         content_type++;
     }
@@ -295,21 +295,24 @@ int Connect(Request* request){
 void Process_GET(Request* request){
     // opens tcp connection with the http server
     int sockfd = Connect(request);
-    printf("Connected to server\n");
+    // printf("Connected to server\n");
     // download/retrieve the document from the http server
     dynamic_string* req = create_dynamic_string();
     char* temp = (char*)malloc(sizeof(char)*MAXLEN);
     sprintf(temp,"GET %s HTTP/1.1\r\nHost: %s\r\n", request->file_path, request->serv_ip);
+    // printf("Temp is %s\n", temp);
     
     insert_mess_into_string(req, temp);
     // connection
     insert_mess_into_string(req,"Connection: close\r\n");
+    // printf("req is %s.\n", req->data);
     
     // date 
     time_t tnull = time(NULL);
     struct tm* local;
     local = localtime(&tnull);
     char *tme = asctime(local);
+    tme[strlen(tme)-1] = '\0';
     insert_mess_into_string(req,"Date: ");
     insert_mess_into_string(req,tme);
     insert_mess_into_string(req,"\r\n");
@@ -328,6 +331,7 @@ void Process_GET(Request* request){
     local->tm_mday -= 2;
     mktime(local);
     char *time2= asctime(local);
+    time2[strlen(time2)-1] = '\0';
     insert_mess_into_string(req,time2);
     insert_mess_into_string(req,"\r\n");
 
@@ -335,13 +339,14 @@ void Process_GET(Request* request){
     insert_mess_into_string(req,"\r\n");
 
     // send the request to the server
-    printf("Request:\n%s\n",req->data);
+    printf("Request:\n%s",req->data);
     send_in_packets(sockfd, req->data, req->len);
     
     // receive the response from the server
     // we also add a timeout of 3 seconds. If we dont receive the data within
     // the timeout we close the connection and print the timeout message
     int content_len;
+    char* content_type;
     dynamic_string* content, *response;
     struct pollfd fds[1];
     fds[0].fd = sockfd;
@@ -360,10 +365,13 @@ void Process_GET(Request* request){
         if (fds[0].revents & POLLIN){
             response = create_dynamic_string();
             receive_headers(sockfd,response);
+            printf("Response:\n%s",response->data);
 
             content_len = get_content_length(response->data);
+            // get the content type header from the response
+            content_type = get_content_type(response->data);
             // We can parse the headers here but since we are not using all of them
-            // we have only parsed the content length
+            // we have only parsed the content length and content type
             content = create_dynamic_string();
             receive_content(sockfd, content, content_len);
         }
@@ -410,8 +418,7 @@ void Process_GET(Request* request){
         fputc(content->data[i],fptr);
     }
 
-    // get the content type header from the response
-    char* content_type = get_content_type(response->data);
+    fclose(fptr);
 
     int pid = fork();
     if (pid == 0){
@@ -423,17 +430,23 @@ void Process_GET(Request* request){
         // any other -> gedit
         if (strcmp(content_type, "text/html") == 0){
             execlp("google-chrome", "google-chrome", filename, NULL);
+            // printf("Error in opening chrome\n");
         }
         else if (strcmp(content_type, "application/pdf") == 0){
             execlp("acroread", "acroread", filename, NULL);
+            // printf("Error in opening adobe acrobat\n");
         }
         else if (strcmp(content_type, "image/jpeg") == 0){
             execlp("gimp", "gimp", filename, NULL);
+            // printf("Error in opening gimp\n");
         }
         else{
             execlp("gedit", "gedit", filename, NULL);
+            // printf("Error in opening gedit\n");
         }
-
+        // printf("Opening file in default application\n");
+        execlp("xdg-open", "xdg-open", filename, NULL);
+        exit(1);
     }
     return;
 }
@@ -456,25 +469,9 @@ void Process_PUT(Request* request){
     struct tm* local;
     local = localtime(&tnull);
     char *tme = asctime(local);
+    tme[strlen(tme)-1] = '\0';
     insert_mess_into_string(req,"Date: ");
     insert_mess_into_string(req,tme);
-    insert_mess_into_string(req,"\r\n");
-
-    // accept
-    insert_mess_into_string(req,"Accept: ");
-    insert_mess_into_string(req,get_mime_type(request->file_path));
-    insert_mess_into_string(req,"\r\n");
-
-    // Accept-Language: en-us preferred, otherwise just English
-    insert_mess_into_string(req,"Accept-Language: en-us, en\r\n");
-
-    // if-modified-since
-    insert_mess_into_string(req, "If-Modified-Since: ");
-    // get current time - 2 days
-    local->tm_mday -= 2;
-    mktime(local);
-    char *time2= asctime(local);
-    insert_mess_into_string(req,time2);
     insert_mess_into_string(req,"\r\n");
 
     // content-language
@@ -503,8 +500,14 @@ void Process_PUT(Request* request){
     insert_mess_into_string(req,get_mime_type(request->file_path));
     insert_mess_into_string(req,"\r\n");
 
+    // Accept-Language: en-us preferred, otherwise just English
+    insert_mess_into_string(req,"Accept-Language: en-us, en\r\n");
+
     // end of headers
     insert_mess_into_string(req,"\r\n");
+
+    // print the request
+    printf("Request:\n%s",req->data);
 
     // read the file and get the content
     fptr = fopen(request->file_name,"r");
@@ -520,13 +523,13 @@ void Process_PUT(Request* request){
     insert_mess_into_string(req,content);
 
     // send the request in packets
-    printf("Request:\n%s\n",req->data);
     send_in_packets(sockfd,req->data,req->len);
 
     // receive the response
     dynamic_string* response = create_dynamic_string();
     // receive the headers
     receive_headers(sockfd,response);
+    printf("Response:\n%s",response->data);
 
     close(sockfd);
 
