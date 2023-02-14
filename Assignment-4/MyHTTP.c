@@ -418,8 +418,35 @@ int main(){
             }
             printf("%s", request->data);
 
+            // Record the time when the request is received
+            time_t t = time(NULL);
+
             //Now we need to parse the request
             int req_type = parse_request(request->data);
+            if(req_type==1 || req_type==2){
+                //This is a GET or PUT request
+                //We append the entry to the log file
+                FILE* fptr = fopen("AccessLog.txt","a");
+                if(fptr == NULL){
+                    perror("Error in opening log file");
+                    exit(1);
+                }
+                //the format is <Date(ddmmyy)>:<Time(hhmmss)>:<Client IP>:<Client Port>:<GET/PUT>:<URL>
+                char* date = (char*)malloc(sizeof(char)*7);
+                char* time = (char*)malloc(sizeof(char)*7);
+                strftime(date, 7, "%d%m%y", localtime(&t));
+                strftime(time, 7, "%H%M%S", localtime(&t));
+                fprintf(fptr, "%s:%s:%s:%d:%s:", date, time, inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port), (req_type==1)?"GET":"PUT");
+                char* url = (char*)malloc(sizeof(char)*MAXLEN), *temp;
+                strcpy(url, request->data);
+                temp = strtok(url, " ");
+                temp = strtok(NULL, " ");
+                fprintf(fptr, "%s\n", temp);
+                fclose(fptr);
+                free(date);
+                free(time);
+                free(url);
+            }
             if(req_type == 1){
                 //This is a GET request
                 //We need to handle it
