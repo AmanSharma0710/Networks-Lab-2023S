@@ -310,13 +310,12 @@ void Process_GET(Request* request){
     insert_mess_into_string(req,"Connection: close\r\n");
     
     // date 
-    time_t tnull = time(NULL);
-    struct tm* local;
-    local = localtime(&tnull);
-    char *tme = asctime(local);
-    tme[strlen(tme)-1] = '\0';
+    time_t now = time(0);
+    struct tm tm = *gmtime(&now);
+    memset(temp, 0, MAXLEN);
+    strftime(temp, MAXLEN, "%a, %d %b %Y %H:%M:%S %Z", &tm);
     insert_mess_into_string(req,"Date: ");
-    insert_mess_into_string(req,tme);
+    insert_mess_into_string(req, temp);
     insert_mess_into_string(req,"\r\n");
 
     // accept
@@ -330,11 +329,10 @@ void Process_GET(Request* request){
     // if-modified since
     insert_mess_into_string(req, "If-Modified-Since: ");
     // get current time - 2 days
-    local->tm_mday -= 2;
-    mktime(local);
-    char *time2= asctime(local);
-    time2[strlen(time2)-1] = '\0';
-    insert_mess_into_string(req,time2);
+    time_t now2 = now - 2*24*60*60;
+    struct tm *local = localtime(&now2);
+    strftime(temp, MAXLEN, "%a, %d %b %Y %H:%M:%S %Z", local);
+    insert_mess_into_string(req,temp);
     insert_mess_into_string(req,"\r\n");
 
     // end of headers
@@ -470,13 +468,12 @@ void Process_PUT(Request* request){
     insert_mess_into_string(req,"Connection: close\r\n");
     
     // date 
-    time_t tnull = time(NULL);
-    struct tm* local;
-    local = localtime(&tnull);
-    char *tme = asctime(local);
-    tme[strlen(tme)-1] = '\0';
+    time_t now = time(0);
+    struct tm tm = *gmtime(&now);
+    memset(temp, 0, MAXLEN);
+    strftime(temp, MAXLEN, "%a, %d %b %Y %H:%M:%S %Z", &tm);
     insert_mess_into_string(req,"Date: ");
-    insert_mess_into_string(req,tme);
+    insert_mess_into_string(req, temp);
     insert_mess_into_string(req,"\r\n");
 
     // content-language
@@ -586,15 +583,12 @@ int main(){
         command[n-1] = '\0';
         Request* request = CreateReq();
         if (strcmp(command, "QUIT") == 0){
-            printf("Browser is shutting down\n");
             break;
         }
         if (parse_request(command, request) == -1) continue;
         if (strcmp(request->method, "GET") == 0){
-            printf("Processing GET request\n");
             Process_GET(request);
         } else if (strcmp(request->method, "PUT") == 0){
-            printf("Processing PUT request\n");
             Process_PUT(request);
         }
         free(command);

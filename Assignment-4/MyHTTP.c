@@ -237,14 +237,12 @@ void handle_get_request(int sockfd, char* request){
     // expires
     insert_mess_into_string(req, "Expires: ");
     // get current time + 3 days
-    time_t tnull = time(NULL);
-    struct tm* local;
-    local = localtime(&tnull);
-    local->tm_mday += 3;
-    mktime(local);
-    char *time= asctime(local);
-    time[strlen(time)-1] = '\0';
-    insert_mess_into_string(req,time);
+    time_t now = time(0);
+    now += 3*24*60*60;
+    struct tm tm = *gmtime(&now);
+    memset(temp, 0, MAXLEN);
+    strftime(temp, MAXLEN, "%a, %d %b %Y %H:%M:%S %Z", &tm);
+    insert_mess_into_string(req, temp);
     insert_mess_into_string(req,"\r\n");
 
     // content-language
@@ -264,11 +262,11 @@ void handle_get_request(int sockfd, char* request){
     // last-modified
     struct stat attr;
     stat(file_path, &attr);
-    local = localtime(&(attr.st_mtime));
-    time= asctime(local);
-    time[strlen(time)-1] = '\0';
+    tm = *gmtime(&(attr.st_mtime));
+    memset(temp, 0, MAXLEN);
+    strftime(temp, MAXLEN, "%a, %d %b %Y %H:%M:%S %Z", &tm);
     insert_mess_into_string(req,"Last-Modified: ");
-    insert_mess_into_string(req,time);
+    insert_mess_into_string(req,temp);
     insert_mess_into_string(req,"\r\n");
 
     // read the file and get the content length
