@@ -302,11 +302,16 @@ void handle_get_request(int sockfd, char* request){
         exit(1);
     }
     char* content = (char*)malloc(content_len*sizeof(char));
-    fread(content,1,content_len,fptr);
+    if(fread(content, sizeof(char), content_len, fptr) != content_len){
+        printf("Error in reading file\n");
+        exit(1);
+    }
     fclose(fptr);
 
     // add the content to the request
-    insert_mess_into_string(req,content);
+    for(int i=0;i<content_len;i++){
+        insert_into_string(req,content[i]);
+    }
 
     // send the request in packets
     send_in_packets(sockfd,req->data,req->len);
