@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 #include<netinet/in.h>
 #include<ctype.h>
+#include<sys/stat.h>
 
 #define SERV_PORT 80
 #define MAXLEN 1000
@@ -84,35 +85,6 @@ char* get_mime_type(char* filename){
     return "text/*";
 }
 
-typedef struct { 
-    char* method;
-    char* url;
-    char* file_path;
-    char* serv_ip;
-    int serv_port;
-    char* file_name; // for PUT request
-} Request;
-
-Request* CreateReq(){
-    Request* req = (Request*)malloc(sizeof(Request));
-    req->method = (char*) malloc(sizeof(char) * MAXLEN);
-    req->url = (char*) malloc(sizeof(char) * MAXLEN);
-    req->file_path = (char*) malloc(sizeof(char) * MAXLEN);
-    req->serv_ip = (char*) malloc(sizeof(char) * MAXLEN);
-    req->file_name = (char*) malloc(sizeof(char) * MAXLEN);
-    req->serv_port = 80;
-    return req;
-}
-
-void DelReq(Request* req){
-    free(req->method);
-    free(req->url);
-    free(req->file_path);
-    free(req->file_name);
-    free(req->serv_ip);
-    free(req);
-}
-
 void send_in_packets(int sockfd, char *data, size_t data_len){
 	size_t packet_len = 50;
 	char *packet = (char *)malloc(packet_len*sizeof(char));
@@ -134,7 +106,7 @@ void send_in_packets(int sockfd, char *data, size_t data_len){
 	free(packet);
 }
 
-void receive_headers(int sockfd, dynamic_string* ds){
+int receive_headers(int sockfd, dynamic_string* ds){
     empty_string(ds);
     char buffer[50];
     int received = 0;
@@ -143,6 +115,10 @@ void receive_headers(int sockfd, dynamic_string* ds){
         if(n<0){
             perror("Error in receiving");
             exit(1);   
+        }
+        if(n==0){
+            printf("Connection unexpectedly closed by server\n");
+            return 1;
         }
         int to_receive = n, flag = 0;
         for(int i=0; i<n; i++){
@@ -159,9 +135,10 @@ void receive_headers(int sockfd, dynamic_string* ds){
         received += to_receive;
         if(flag) break;
     }
+    return 0;
 }
 
-void receive_content(int sockfd, dynamic_string* ds, int content_len){
+int receive_content(int sockfd, dynamic_string* ds, int content_len){
     empty_string(ds);
     char buffer[50];
     int received = 0;
@@ -171,11 +148,17 @@ void receive_content(int sockfd, dynamic_string* ds, int content_len){
             perror("Error in receiving");
             exit(1);
         }
-        received += n;
+        if(n == 0){
+            printf("Connection unexpectedly closed by server\n");
+            return 1;
+        }
         for(int i=0; i<n; i++){
             insert_into_string(ds, buffer[i]);
+            received++;
+            if(received == content_len) break;
         }
     }
+    return 0;
 }
 
 // find the content length from the header
@@ -205,280 +188,91 @@ char* get_content_type(char* headers){
     return type;
 }
 
-int parse_request(char* command, Request* request){
-    // printf("command: %s\n", command);
-    // first we parse the command to get the method and url
-    char* method = strtok(command, " ");
-    if (strcmp(method, "GET") == 0 || strcmp(method, "PUT") == 0){
-        strcpy(request->method, method);
+int parse_request(char* request){
+    char *req = strcpy((char*)malloc(sizeof(char)*strlen(request)+1), request);
+    char* method = strtok(req, " ");
+    if(strcmp(method, "GET") == 0){
+        free(req);
+        return 1;
     }
-    else{
-        printf("Invalid method\n");
-        return -1;
+    if(strcmp(method, "PUT") == 0){
+        free(req);
+        return 2;
     }
-    // printf("method: %s\n", request->method);
-    
-    char* url = strtok(NULL, " ");
-    if (url == NULL){
-        printf("No URL\n");
-        return -1;
-    }
-    strcpy(request->url, url);
-    // printf("url: %s\n", request->url);
-
-
-    // if the method is PUT, we need to parse the file name
-    if (strcmp("PUT", request->method) == 0){
-        char* file_name = strtok(NULL, " ");
-        if (file_name == NULL){
-            printf("No file name\n");
-            return -1;
-        }
-        strcpy(request->file_name, file_name);
-        // printf("file_name: %s",file_name);
-    }
-    else{
-        char* file_name = strtok(NULL, " ");
-        if (file_name != NULL){
-            printf("Invalid command\n");
-            return -1;
-        }
-    }
-
-    // now we parse the url to get the server ip and port
-    // url format will be http://<ip>/<path>:<port>
-    char* ip = strtok(url, "/");
-    if (strcmp(ip, "http:") != 0){
-        printf("Invalid url\n");
-        return -1;
-    }
-    ip = strtok(NULL, "/");
-    strcpy(request->serv_ip, ip);
-    // printf("ip: %s\n", request->serv_ip);
-
-    char* path = strtok(NULL, ":");
-    strcpy(request->file_path, "/");
-    if (path != NULL){
-        strcat(request->file_path, path);
-    }
-    // printf("path: %s\n", request->file_path);
-
-    char* port = strtok(NULL, ":");
-    if (port == NULL){
-        request->serv_port = SERV_PORT;
-    }
-    else{
-        request->serv_port = atoi(port);
-    }
-    // printf("port: %d\n", request->serv_port);
+    free(req);
+    return 0;
 }
 
-// this function opens a tcp/ip connection with the given url/server
-int Connect(Request* request){
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0){
-        printf("Error in opening socket\n");
-        return -1;
+void send_error_response(int sockfd, int errcode){
+    if(errcode == 200){
+        char* response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 0\r\n\r\n";
+        send_in_packets(sockfd, response, strlen(response));
     }
-    struct sockaddr_in serv_addr;
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(request->serv_port);
-    serv_addr.sin_addr.s_addr = inet_addr(request->serv_ip);
-    if (connect(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0){
-        printf("Error in connecting to server\n");
-        return -1;
+    else if(errcode == 400){
+        char* response = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nContent-Length: 0\r\n\r\n";
+        send_in_packets(sockfd, response, strlen(response));
     }
-    return sockfd;
-}
-
-// This function sends the GET request to the server and receives the response
-void Process_GET(Request* request){
-    // opens tcp connection with the http server
-    int sockfd = Connect(request);
-    // printf("Connected to server\n");
-    // download/retrieve the document from the http server
-    dynamic_string* req = create_dynamic_string();
-    char* temp = (char*)malloc(sizeof(char)*MAXLEN);
-    sprintf(temp,"GET %s HTTP/1.1\r\nHost: %s\r\n", request->file_path, request->serv_ip);
-    // printf("Temp is %s\n", temp);
-    
-    insert_mess_into_string(req, temp);
-    // connection
-    insert_mess_into_string(req,"Connection: close\r\n");
-    // printf("req is %s.\n", req->data);
-    
-    // date 
-    time_t tnull = time(NULL);
-    struct tm* local;
-    local = localtime(&tnull);
-    char *tme = asctime(local);
-    tme[strlen(tme)-1] = '\0';
-    insert_mess_into_string(req,"Date: ");
-    insert_mess_into_string(req,tme);
-    insert_mess_into_string(req,"\r\n");
-
-    // accept
-    insert_mess_into_string(req,"Accept: ");
-    insert_mess_into_string(req,get_mime_type(request->file_path));
-    insert_mess_into_string(req,"\r\n");
-    
-    // Accept-Language: en-us preferred, otherwise just English
-    insert_mess_into_string(req,"Accept-Language: en-us, en\r\n");
-
-    // if-modified since
-    insert_mess_into_string(req, "If-Modified-Since: ");
-    // get current time - 2 days
-    local->tm_mday -= 2;
-    mktime(local);
-    char *time2= asctime(local);
-    time2[strlen(time2)-1] = '\0';
-    insert_mess_into_string(req,time2);
-    insert_mess_into_string(req,"\r\n");
-
-    // end of headers
-    insert_mess_into_string(req,"\r\n");
-
-    // send the request to the server
-    printf("Request:\n%s",req->data);
-    send_in_packets(sockfd, req->data, req->len);
-    
-    // receive the response from the server
-    // we also add a timeout of 3 seconds. If we dont receive the data within
-    // the timeout we close the connection and print the timeout message
-    int content_len;
-    char* content_type;
-    dynamic_string* content, *response;
-    struct pollfd fds[1];
-    fds[0].fd = sockfd;
-    fds[0].events = POLLIN;
-    int ret = poll(fds, 1, 3000);
-
-    if (ret < 0){
-        printf("Error in polling\n");
-        return;
-    }
-    else if (ret == 0){
-        printf("Timeout\n");
-        return;
+    else if(errcode == 403){
+        char* response = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/html\r\nContent-Length: 0\r\n\r\n";
+        send_in_packets(sockfd, response, strlen(response));
     }
     else{
-        if (fds[0].revents & POLLIN){
-            response = create_dynamic_string();
-            receive_headers(sockfd,response);
-            printf("Response:\n%s",response->data);
-
-            content_len = get_content_length(response->data);
-            // get the content type header from the response
-            content_type = get_content_type(response->data);
-            // We can parse the headers here but since we are not using all of them
-            // we have only parsed the content length and content type
-            content = create_dynamic_string();
-            receive_content(sockfd, content, content_len);
-        }
-    } 
-    // close the connection
-    close(sockfd);
-    free(temp);
-    // we get the status code from the response
-    temp = strtok(response->data, " ");
-    temp = strtok(NULL, " ");
-    int status_code = atoi(temp);
-
-    if (status_code != 200){
-        if (status_code == 404){
-            printf("Error 404: File not found\n");
-        }
-        else if (status_code == 400){
-            printf("Error 400: Bad request\n");
-        }
-        else if (status_code == 403){
-            printf("Error 403: Forbidden\n");
-        }
-        else {
-            printf("Error %d: Unknown error\n", status_code);
-        }
-        return;
-    }
-    
-    // get the name of the file from the request->file_path
-    // get the last token splitting request->file_path with delim = /
-    char* filename = strrchr(request->file_path, '/');
-    if (filename != NULL) filename = filename + 1;
-    else{
-        printf("Error in file_path\n");
-        exit(1);
-    }
-    FILE* fptr = fopen(filename,"w");
-    if (fptr == NULL){
-        printf("Error in opening file\n");
-        exit(1);
-    }
-    // now we write to the file 
-    for(int i=0;i<content->len;i++){
-        fputc(content->data[i],fptr);
-    }
-
-    fclose(fptr);
-
-    int pid = fork();
-    if (pid == 0){
-        // child process
-        // the file should be opened in the application according to the following legend:
-        // .html -> chrome
-        // .pdf -> adobe acrobat
-        // .jpeg -> gimp
-        // any other -> gedit
-        if (strcmp(content_type, "text/html") == 0){
-            execlp("google-chrome", "google-chrome", filename, NULL);
-            // printf("Error in opening chrome\n");
-        }
-        else if (strcmp(content_type, "application/pdf") == 0){
-            execlp("acroread", "acroread", filename, NULL);
-            // printf("Error in opening adobe acrobat\n");
-        }
-        else if (strcmp(content_type, "image/jpeg") == 0){
-            execlp("gimp", "gimp", filename, NULL);
-            // printf("Error in opening gimp\n");
-        }
-        else{
-            execlp("gedit", "gedit", filename, NULL);
-            // printf("Error in opening gedit\n");
-        }
-        // printf("Opening file in default application\n");
-        execlp("xdg-open", "xdg-open", filename, NULL);
-        exit(1);
+        char* response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: 0\r\n\r\n";
+        send_in_packets(sockfd, response, strlen(response));
     }
     return;
 }
 
-void Process_PUT(Request* request){
-    // opens tcp connection with the http server
-    int sockfd = Connect(request);
 
-    // upload the document to the http server
+void handle_get_request(int sockfd, char* request){
+    // get the file path
+    char* file_path = strtok(request, " ");
+    file_path = strtok(NULL, " ");
+
     dynamic_string* req = create_dynamic_string();
     char* temp = (char*)malloc(sizeof(char)*MAXLEN);
-    sprintf(temp,"PUT %s HTTP/1.1\r\nHost: %s\r\n", request->file_path, request->serv_ip);
+    sprintf(temp,"HTTP/1.1 200 OK\r\n");
     insert_mess_into_string(req, temp);
 
-    // connection
-    insert_mess_into_string(req,"Connection: close\r\n");
-    
-    // date 
+    // expires
+    insert_mess_into_string(req, "Expires: ");
+    // get current time + 3 days
     time_t tnull = time(NULL);
     struct tm* local;
     local = localtime(&tnull);
-    char *tme = asctime(local);
-    tme[strlen(tme)-1] = '\0';
-    insert_mess_into_string(req,"Date: ");
-    insert_mess_into_string(req,tme);
+    local->tm_mday += 3;
+    mktime(local);
+    char *time= asctime(local);
+    time[strlen(time)-1] = '\0';
+    insert_mess_into_string(req,time);
     insert_mess_into_string(req,"\r\n");
+
+    // content-language
+    insert_mess_into_string(req,"Cache-control: no-store\r\n");
 
     // content-language
     insert_mess_into_string(req,"Content-Language: en-us\r\n");
 
+    //check if we have access to the file
+    // if we don't have access, send 403
+    if(access(file_path, F_OK) == -1){
+        // file doesn't exist
+        send_error_response(sockfd, 403);
+        return;
+    }
+    
+    // last-modified
+    struct stat attr;
+    stat(file_path, &attr);
+    local = localtime(&(attr.st_mtime));
+    time= asctime(local);
+    time[strlen(time)-1] = '\0';
+    insert_mess_into_string(req,"Last-Modified: ");
+    insert_mess_into_string(req,time);
+    insert_mess_into_string(req,"\r\n");
+
     // read the file and get the content length
-    FILE* fptr = fopen(request->file_name,"r");
+    FILE* fptr = fopen(file_path,"r");
     if (fptr == NULL){
         printf("Error in opening file\n");
         exit(1);
@@ -497,20 +291,14 @@ void Process_PUT(Request* request){
     
     // content-type
     insert_mess_into_string(req,"Content-Type: ");
-    insert_mess_into_string(req,get_mime_type(request->file_path));
+    insert_mess_into_string(req,get_mime_type(file_path));
     insert_mess_into_string(req,"\r\n");
-
-    // Accept-Language: en-us preferred, otherwise just English
-    insert_mess_into_string(req,"Accept-Language: en-us, en\r\n");
 
     // end of headers
     insert_mess_into_string(req,"\r\n");
 
-    // print the request
-    printf("Request:\n%s",req->data);
-
     // read the file and get the content
-    fptr = fopen(request->file_name,"r");
+    fptr = fopen(file_path,"r");
     if (fptr == NULL){
         printf("Error in opening file\n");
         exit(1);
@@ -524,62 +312,142 @@ void Process_PUT(Request* request){
 
     // send the request in packets
     send_in_packets(sockfd,req->data,req->len);
-
-    // receive the response
-    dynamic_string* response = create_dynamic_string();
-    // receive the headers
-    receive_headers(sockfd,response);
-    printf("Response:\n%s",response->data);
-
-    close(sockfd);
-
-    free(temp);
-
-    // get the status code
-
-    temp = strtok(response->data, " ");
-    temp = strtok(NULL, " ");
-    int status_code = atoi(temp);
-
-    if (status_code != 200){
-        if (status_code == 404){
-            printf("Error 404: File not found\n");
-        }
-        else if (status_code == 400){
-            printf("Error 400: Bad request\n");
-        }
-        else if (status_code == 403){
-            printf("Error 403: Forbidden\n");
-        }
-        else {
-            printf("Error %d: Unknown error\n", status_code);
-        }
-        return;
-    }    
+    return;
 }
 
+void handle_put_request(int sockfd, char* request){
+    // get the file path
+    char* file_path = strcpy((char*)malloc(sizeof(char)*MAXLEN), request);
+    file_path = strtok(file_path, " ");
+    file_path = strtok(NULL, " ");
+
+    // check if the directory exists
+    char* dir_path = (char*)malloc(sizeof(char)*MAXLEN);
+    strcpy(dir_path,file_path);
+    char* temp = strrchr(dir_path,'/');
+    *temp = '\0';
+    struct stat st;
+    if(stat(dir_path, &st) == -1){
+        // directory doesn't exist
+        // make the directory
+        mkdir(dir_path, 0777);
+    }
+
+    // get the content length
+    int len = get_content_length(request);
+    if(len == -1){
+        // content length not found
+        send_error_response(sockfd, 400);
+        return;
+    }
+
+    // get the content
+    dynamic_string* content = create_dynamic_string();
+    if(receive_content(sockfd, content, len) == 1){
+        // error in receiving content
+        send_error_response(sockfd, 400);
+        return;
+    }
+
+    // write the content to the file
+    FILE* fptr = fopen(file_path,"w");
+    if (fptr == NULL){
+        send_error_response(sockfd, 403);
+        return;
+    }
+
+    fwrite(content->data,1,content->len,fptr);
+    fclose(fptr);
+
+    // send the response
+    send_error_response(sockfd, 200);
+
+    // free the memory
+    free(dir_path);
+    delete_string(content);
+    return;
+}
+
+
 int main(){
+    //Setup the server
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0), newsockfd;
+    if(sockfd < 0){
+        perror("Error in creating socket");
+        exit(1);
+    }
+    struct sockaddr_in serv_addr, cli_addr;
+    socklen_t clilen = sizeof(cli_addr);
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(8080);
+    serv_addr.sin_addr.s_addr = INADDR_ANY;
+    if(bind(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0){
+        perror("Error in binding");
+        exit(1);
+    }
+    if(listen(sockfd, 10) < 0){
+        perror("Error in listening");
+        exit(1);
+    }
+    //Now we are ready to accept connections
     while(1){
-        printf("MyBrowser> ");
-        char* command = (char*)malloc(100*sizeof(char));
-        size_t size = 100;
-        int n = getline(&command,&size,stdin);
-        command[n-1] = '\0';
-        Request* request = CreateReq();
-        if (strcmp(command, "QUIT") == 0){
-            printf("Browser is shutting down\n");
-            break;
+        newsockfd = accept(sockfd, (struct sockaddr*)&cli_addr, &clilen);
+        if(newsockfd < 0){
+            perror("Error in accepting");
+            exit(1);
         }
-        if (parse_request(command, request) == -1) continue;
-        if (strcmp(request->method, "GET") == 0){
-            printf("Processing GET request\n");
-            Process_GET(request);
-        } else if (strcmp(request->method, "PUT") == 0){
-            printf("Processing PUT request\n");
-            Process_PUT(request);
+        //Now we have a connection
+        //We need to fork a child process to handle the connection
+        int pid = fork();
+        if(pid < 0){
+            perror("Error in forking");
+            exit(1);
         }
-        free(command);
-        DelReq(request);
+        if(pid == 0){
+            //This is the child process
+            close(sockfd);
+            //We need to handle the connection
+            //First we need to receive the request
+            dynamic_string* request = create_dynamic_string();
+            if(receive_headers(newsockfd, request) == 1){
+                //Error in receiving headers
+                send_error_response(newsockfd, 400);
+                //Now we need to close the connection
+                close(newsockfd);
+                //Now we need to free the memory
+                delete_string(request);
+                exit(0);
+            }
+            printf("%s", request->data);
+
+            //Now we need to parse the request
+            int req_type = parse_request(request->data);
+            if(req_type == 1){
+                //This is a GET request
+                //We need to handle it
+                handle_get_request(newsockfd, request->data);
+            }
+            else if(req_type == 2){
+                //This is a PUT request
+                //We need to handle it
+                handle_put_request(newsockfd, request->data);
+            }
+            else{
+                //This is an invalid request
+                //We need to send a 400 Bad Request response
+                send_error_response(newsockfd, 400);
+            }
+            //Now we need to close the connection
+            close(newsockfd);
+            //Now we need to free the memory
+            delete_string(request);
+            exit(0);
+        }
+        else{
+            //This is the parent process
+            //We need to close the connection
+            close(newsockfd);
+        }
     }
     return 0;
 }

@@ -10,6 +10,7 @@
 #include<netinet/in.h>
 #include<ctype.h>
 
+
 #define SERV_PORT 80
 #define MAXLEN 1000
 
@@ -134,7 +135,7 @@ void send_in_packets(int sockfd, char *data, size_t data_len){
 	free(packet);
 }
 
-void receive_headers(int sockfd, dynamic_string* ds){
+int receive_headers(int sockfd, dynamic_string* ds){
     empty_string(ds);
     char buffer[50];
     int received = 0;
@@ -143,6 +144,10 @@ void receive_headers(int sockfd, dynamic_string* ds){
         if(n<0){
             perror("Error in receiving");
             exit(1);   
+        }
+        if(n==0){
+            printf("Connection unexpectedly closed by server\n");
+            return 1;
         }
         int to_receive = n, flag = 0;
         for(int i=0; i<n; i++){
@@ -159,9 +164,10 @@ void receive_headers(int sockfd, dynamic_string* ds){
         received += to_receive;
         if(flag) break;
     }
+    return 0;
 }
 
-void receive_content(int sockfd, dynamic_string* ds, int content_len){
+int receive_content(int sockfd, dynamic_string* ds, int content_len){
     empty_string(ds);
     char buffer[50];
     int received = 0;
@@ -171,11 +177,17 @@ void receive_content(int sockfd, dynamic_string* ds, int content_len){
             perror("Error in receiving");
             exit(1);
         }
-        received += n;
+        if(n == 0){
+            printf("Connection unexpectedly closed by server\n");
+            return 1;
+        }
         for(int i=0; i<n; i++){
             insert_into_string(ds, buffer[i]);
+            received++;
+            if(received == content_len) break;
         }
     }
+    return 0;
 }
 
 // find the content length from the header
@@ -206,7 +218,6 @@ char* get_content_type(char* headers){
 }
 
 int parse_request(char* command, Request* request){
-    // printf("command: %s\n", command);
     // first we parse the command to get the method and url
     char* method = strtok(command, " ");
     if (strcmp(method, "GET") == 0 || strcmp(method, "PUT") == 0){
@@ -216,7 +227,6 @@ int parse_request(char* command, Request* request){
         printf("Invalid method\n");
         return -1;
     }
-    // printf("method: %s\n", request->method);
     
     char* url = strtok(NULL, " ");
     if (url == NULL){
@@ -224,7 +234,6 @@ int parse_request(char* command, Request* request){
         return -1;
     }
     strcpy(request->url, url);
-    // printf("url: %s\n", request->url);
 
 
     // if the method is PUT, we need to parse the file name
@@ -235,7 +244,6 @@ int parse_request(char* command, Request* request){
             return -1;
         }
         strcpy(request->file_name, file_name);
-        // printf("file_name: %s",file_name);
     }
     else{
         char* file_name = strtok(NULL, " ");
@@ -254,14 +262,12 @@ int parse_request(char* command, Request* request){
     }
     ip = strtok(NULL, "/");
     strcpy(request->serv_ip, ip);
-    // printf("ip: %s\n", request->serv_ip);
 
     char* path = strtok(NULL, ":");
     strcpy(request->file_path, "/");
     if (path != NULL){
         strcat(request->file_path, path);
     }
-    // printf("path: %s\n", request->file_path);
 
     char* port = strtok(NULL, ":");
     if (port == NULL){
@@ -270,7 +276,6 @@ int parse_request(char* command, Request* request){
     else{
         request->serv_port = atoi(port);
     }
-    // printf("port: %d\n", request->serv_port);
 }
 
 // this function opens a tcp/ip connection with the given url/server
@@ -295,17 +300,14 @@ int Connect(Request* request){
 void Process_GET(Request* request){
     // opens tcp connection with the http server
     int sockfd = Connect(request);
-    // printf("Connected to server\n");
     // download/retrieve the document from the http server
     dynamic_string* req = create_dynamic_string();
     char* temp = (char*)malloc(sizeof(char)*MAXLEN);
     sprintf(temp,"GET %s HTTP/1.1\r\nHost: %s\r\n", request->file_path, request->serv_ip);
-    // printf("Temp is %s\n", temp);
     
     insert_mess_into_string(req, temp);
     // connection
     insert_mess_into_string(req,"Connection: close\r\n");
-    // printf("req is %s.\n", req->data);
     
     // date 
     time_t tnull = time(NULL);
@@ -339,7 +341,6 @@ void Process_GET(Request* request){
     insert_mess_into_string(req,"\r\n");
 
     // send the request to the server
-    printf("Request:\n%s",req->data);
     send_in_packets(sockfd, req->data, req->len);
     
     // receive the response from the server
@@ -364,8 +365,10 @@ void Process_GET(Request* request){
     else{
         if (fds[0].revents & POLLIN){
             response = create_dynamic_string();
-            receive_headers(sockfd,response);
-            printf("Response:\n%s",response->data);
+            if(receive_headers(sockfd,response)==1){
+                return;
+            }
+            printf("%s",response->data);
 
             content_len = get_content_length(response->data);
             // get the content type header from the response
@@ -373,7 +376,9 @@ void Process_GET(Request* request){
             // We can parse the headers here but since we are not using all of them
             // we have only parsed the content length and content type
             content = create_dynamic_string();
-            receive_content(sockfd, content, content_len);
+            if(receive_content(sockfd, content, content_len)==1){
+                return;
+            }
         }
     } 
     // close the connection
@@ -458,7 +463,7 @@ void Process_PUT(Request* request){
     // upload the document to the http server
     dynamic_string* req = create_dynamic_string();
     char* temp = (char*)malloc(sizeof(char)*MAXLEN);
-    sprintf(temp,"PUT %s HTTP/1.1\r\nHost: %s\r\n", request->file_path, request->serv_ip);
+    sprintf(temp,"PUT %s/%s HTTP/1.1\r\nHost: %s\r\n", request->file_path, request->file_name, request->serv_ip);
     insert_mess_into_string(req, temp);
 
     // connection
@@ -497,7 +502,7 @@ void Process_PUT(Request* request){
     
     // content-type
     insert_mess_into_string(req,"Content-Type: ");
-    insert_mess_into_string(req,get_mime_type(request->file_path));
+    insert_mess_into_string(req,get_mime_type(request->file_name));
     insert_mess_into_string(req,"\r\n");
 
     // Accept-Language: en-us preferred, otherwise just English
@@ -505,9 +510,6 @@ void Process_PUT(Request* request){
 
     // end of headers
     insert_mess_into_string(req,"\r\n");
-
-    // print the request
-    printf("Request:\n%s",req->data);
 
     // read the file and get the content
     fptr = fopen(request->file_name,"r");
@@ -527,35 +529,52 @@ void Process_PUT(Request* request){
 
     // receive the response
     dynamic_string* response = create_dynamic_string();
-    // receive the headers
-    receive_headers(sockfd,response);
-    printf("Response:\n%s",response->data);
 
-    close(sockfd);
+    struct pollfd fds[1];
+    fds[0].fd = sockfd;
+    fds[0].events = POLLIN;
+    int ret = poll(fds, 1, 3000);
+    if (ret == 0){
+        printf("Timeout\n");
+    }
+    else if (ret == -1){
+        printf("Error in receiving response\n");
+    }
+    else{
+        if (fds[0].revents & POLLIN){
+            // receive the headers
+            if(receive_headers(sockfd,response)==1){
+                return;
+            }
+            printf("%s",response->data);
 
-    free(temp);
+            close(sockfd);
 
-    // get the status code
+            free(temp);
 
-    temp = strtok(response->data, " ");
-    temp = strtok(NULL, " ");
-    int status_code = atoi(temp);
+            // get the status code
 
-    if (status_code != 200){
-        if (status_code == 404){
-            printf("Error 404: File not found\n");
+            temp = strtok(response->data, " ");
+            temp = strtok(NULL, " ");
+            int status_code = atoi(temp);
+
+            if (status_code != 200){
+                if (status_code == 404){
+                    printf("Error 404: File not found\n");
+                }
+                else if (status_code == 400){
+                    printf("Error 400: Bad request\n");
+                }
+                else if (status_code == 403){
+                    printf("Error 403: Forbidden\n");
+                }
+                else {
+                    printf("Error %d: Unknown error\n", status_code);
+                }
+            }    
         }
-        else if (status_code == 400){
-            printf("Error 400: Bad request\n");
-        }
-        else if (status_code == 403){
-            printf("Error 403: Forbidden\n");
-        }
-        else {
-            printf("Error %d: Unknown error\n", status_code);
-        }
-        return;
-    }    
+    }
+    return;
 }
 
 int main(){
