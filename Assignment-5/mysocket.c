@@ -41,11 +41,44 @@ void *R_thread(void *arg){
 }
 
 void *S_thread(void *arg){
-    sleep(T);
     //Send messages from the Send_Message to the network
+    while(1){
+        sleep(T);
+        //If the queue is empty, sleep for T seconds and try again
+        if(Send_Message->left == Send_Message->right){
+            continue;
+        }
+        //If the queue is not empty, send the message to the network
+        //Add the size of the message to the first 4 bytes of the message in network byte order
+        int len = Send_Message->lengths[Send_Message->left];
+        char message[4];
+        message[0] = (len>>24)&0xFF;
+        message[1] = (len>>16)&0xFF;
+        message[2] = (len>>8)&0xFF;
+        message[3] = len&0xFF;
+        send(sockfd, message, 4, 0);
 
-
-
+        //If the message is larger than MAX_PACKET_SIZE, split it into multiple packets
+        //If the message is smaller than MAX_PACKET_SIZE, send it as it is
+        int len = Send_Message->lengths[Send_Message->left];
+        if(len > MAX_PACKET_SIZE){
+            int num_packets = len/MAX_PACKET_SIZE;
+            for(int i=0; i<num_packets; i++){
+                send(sockfd, Send_Message->messages[Send_Message->left]+i*MAX_PACKET_SIZE, MAX_PACKET_SIZE, 0);
+            }
+            if(len%MAX_PACKET_SIZE != 0){
+                send(sockfd, Send_Message->messages[Send_Message->left]+num_packets*MAX_PACKET_SIZE, len%MAX_PACKET_SIZE, 0);
+            }
+        }
+        else{
+            send(sockfd, Send_Message->messages[Send_Message->left], len, 0);
+        }
+        //Free the memory allocated for the message
+        free(Send_Message->messages[Send_Message->left]);
+        Send_Message->messages[Send_Message->left] = NULL;
+        Send_Message->lengths[Send_Message->left] = 0;
+        Send_Message->left = (Send_Message->left+1)%QUEUE_SIZE;
+    }
 }
 
 
@@ -150,7 +183,8 @@ int my_send(int sockfd, const void *buf, size_t len, int flags){    //The flags 
     //Store the socket to be sent to and the message to be sent in the Send_Message, along with the length of the message
     //If the queue is full, sleep for 1 second and try again
     while(Send_Message->left == (Send_Message->right+1)%QUEUE_SIZE){
-        sleep(1);
+        //sleep(1);
+        //Can sleep but we choose to busy wait
     }
     Send_Message->messages[Send_Message->right] = (char*)malloc(len*sizeof(char));
     memcpy(Send_Message->messages[Send_Message->right], buf, len);
