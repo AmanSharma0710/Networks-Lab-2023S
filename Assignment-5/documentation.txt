@@ -1,5 +1,5 @@
-We have used the following data structure to manage the received and send messages:
-Message_queue: This is a queue of messages. Each message is a structure that contains the following fields:
+We have used the following data structure to manage the received and sent messages:
+Message_queue: This is a queue of messages. It is a structure that contains the following fields:
     char ** messages: This is an array of strings. Each string is a message.
     int * lengths: This is an array of integers. Each integer is the length of the corresponding message in the messages array.
     int left: Stores the left index of the queue so basically the tail
