@@ -267,7 +267,8 @@ int my_recv(int sockfd, void *buf, size_t len, int flags){  //The flags are igno
     }
     //If the queue is empty, sleep for 1 second and try again
     while(Received_Message->left == Received_Message->right){
-        sleep(1);
+        //sleep(1);
+        //busy wait mfs
     }
     int length;
     //Read the message from the Received_Message and copy it to the buffer

@@ -13,3 +13,31 @@ The queue is full when the right pointer is one less than the left pointer.
 No synchronization is required between the 2 instances of this data structure: Send_Message and Received_Message as they are always accessed by different threads.
 R thread always accesses the Received_Message queue and S thread always accesses the Send_Message queue.
 Main thread accesses both the queues but we update the head and tail pointers of the queue in a synchronized manner. 
+Moreover since only one thread is reading per data structure and one thread is writing to it, there is no race condition.
+The only race that arises is when my_close is called which has been handled by sleeping for 5 seconds in order to allow the R and S threads to finish current execution.
+All the data structures are initialized in the main thread in my_socket call and destroyed in my_close call.
+
+Working of my_send call:
+    1. We check if the socket is open. If it is open Send_Message will not be NULL. If its NULL we set the appropriate error code
+    2. Next we busy wait for the queue to have space and then store our message in it and return.
+    3. This busywaiting is due to our buffer being full, and can be avoided with a large enough buffer.
+
+    Later when S thread wakes up(stops sleeping) and finds that the queue is not empty, it sends the messages in order of them being added to the queue until all the messages are sent, and then goes back to sleep:)
+
+Working of my_recv call:
+    1. We check if the socket is open and if not we return error.
+    2. We busy wait until the queue has some data that can be read. (Could also sleep for a time and retry but we choose to busywait)
+    3. We read the data from the queue and do memory management.
+    4. We return the length of the data received, filling part of the buffer if message is shorter or truncanting and droppping the excess message if it is longer(like UDP).
+    5. An addition would be to support the peek flag, but is not implemented.
+
+    When the R thread runs, it waits on the recv call. It first reads the size of the message it will receive and then receives the message and stores it in the table. It waits for the table to have space in case it is full.
+
+DESIGN CHOICES
+    -The message boundaries are defined by sending the length of the message in network order as the first 4 bytes and reading them on the other end.
+        -This ensures compatibility with big endian and little endian systems.
+    -We busy wait at times instead of sleep calls to make things like my_send and my_recv faster.
+    -All communication is done on a global socket called my_sockfd which is set either when accept call is made(so it is newsockfd for server side) or when connect call is made(for client side).
+    -A queue is used to maintain Send_Message and Received_Message to maintain the FIFO ordering which is required for TCP and thus is a feature of MyTCP as well.
+
+All the other functions are as defined in the Problem Statement.
