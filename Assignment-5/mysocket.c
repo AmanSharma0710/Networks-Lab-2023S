@@ -37,15 +37,54 @@ pthread_t R, S;
 
 void *R_thread(void *arg){
     //Receive messages from the network and put them in the Received_Message
+    while(1){
+        //If the queue is not full, receive the message from the network
+        //Read the first 4 bytes of the message to get the size of the message
+        char message[4];
+        int bytes_read = 0;
+        while(bytes_read < 4){
+            int n = recv(sockfd, message+bytes_read, 4-bytes_read, 0);
+            if(n <= 0){
+                perror("recv");
+                exit(1);
+            }
+            bytes_read += n;
+        }
+        int len = (message[0]<<24)|(message[1]<<16)|(message[2]<<8)|message[3];
+        free(message);
+        //If the message is larger than MAX_PACKET_SIZE, receive it in multiple packets
+        //If the message is smaller than MAX_PACKET_SIZE, receive it as it is
+        bytes_read = 0;
+        char * message = (char*) malloc(len*sizeof(char));
+        while(bytes_read < len){
+            int n = recv(sockfd, message+bytes_read, len-bytes_read, 0);
+            if (n <= 0) {
+                perror("recv");
+                exit(1);
+            }
+            bytes_read += n;
+        }
+        //If the queue is full, sleep for T seconds and try again
+        if((Received_Message->right+1)%QUEUE_SIZE == Received_Message->left){
+            sleep(T);
+            continue;
+        }
+        //Put the message in the queue
+        Received_Message->messages[Received_Message->right] = (char*) malloc(len*sizeof(char));
+        memcpy(Received_Message->messages[Received_Message->right], message, len);
+        free(message);
+        Received_Message->lengths[Received_Message->right] = len;
+        Received_Message->right = (Received_Message->right+1)%QUEUE_SIZE;
+    }
 
 }
 
 void *S_thread(void *arg){
     //Send messages from the Send_Message to the network
     while(1){
-        sleep(T);
         //If the queue is empty, sleep for T seconds and try again
         if(Send_Message->left == Send_Message->right){
+            sleep(T);
             continue;
         }
         //If the queue is not empty, send the message to the network
