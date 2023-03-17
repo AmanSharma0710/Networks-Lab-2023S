@@ -40,7 +40,7 @@ void *R_thread(void *arg){
     while(1){
         //If the queue is not full, receive the message from the network
         //Read the first 4 bytes of the message to get the size of the message
-        char message[4];
+        char* message = (char*) malloc(4*sizeof(char));
         int bytes_read = 0;
         while(bytes_read < 4){
             int n = recv(sockfd, message+bytes_read, 4-bytes_read, 0);
@@ -55,7 +55,7 @@ void *R_thread(void *arg){
         //If the message is larger than MAX_PACKET_SIZE, receive it in multiple packets
         //If the message is smaller than MAX_PACKET_SIZE, receive it as it is
         bytes_read = 0;
-        char * message = (char*) malloc(len*sizeof(char));
+        message = (char*) malloc(len*sizeof(char));
         while(bytes_read < len){
             int n = recv(sockfd, message+bytes_read, len-bytes_read, 0);
             if (n <= 0) {

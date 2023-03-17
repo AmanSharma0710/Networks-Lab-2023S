@@ -1,0 +1,15 @@
+We have used the following data structure to manage the received and send messages:
+Message_queue: This is a queue of messages. Each message is a structure that contains the following fields:
+    char ** messages: This is an array of strings. Each string is a message.
+    int * lengths: This is an array of integers. Each integer is the length of the corresponding message in the messages array.
+    int left: Stores the left index of the queue so basically the tail
+    int right: Stores the right index of the queue so basically the head
+
+This is implemented as a circular queue of size QUEUE_SIZE. 
+The right and the left pointers are used to keep track of the head and the tail of the queue.
+We always read from the left end and write to the right end of the queue.
+The queue is full when the right pointer is one less than the left pointer. 
+
+No synchronization is required between the 2 instances of this data structure: Send_Message and Received_Message as they are always accessed by different threads.
+R thread always accesses the Received_Message queue and S thread always accesses the Send_Message queue.
+Main thread accesses both the queues but we update the head and tail pointers of the queue in a synchronized manner. 
