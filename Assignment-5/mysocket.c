@@ -16,6 +16,7 @@
 #define QUEUE_SIZE 10
 #define MAX_INPUT_SIZE 5000
 #define MAX_PACKET_SIZE 1000
+#define T 1
 
 
 //We use a data structure to store the messages to be sent and received
@@ -23,10 +24,12 @@
 typedef struct {
     char **messages;
     int *lengths;
-    int *socket;
     int left;
     int right;
 } Message_queue;
+
+//Since we are only dealing with one socket, we can use global variables
+int sockfd;
 
 //We define Send_Message and Received_Message as global variables
 Message_queue *Send_Message, *Received_Message;
@@ -38,7 +41,10 @@ void *R_thread(void *arg){
 }
 
 void *S_thread(void *arg){
+    sleep(T);
     //Send messages from the Send_Message to the network
+
+
 
 }
 
@@ -58,7 +64,7 @@ int my_socket(int domain, int type, int protocol){
     }
 
     //Create a socket
-    int sockfd = socket(domain, SOCK_STREAM, protocol);
+    sockfd = socket(domain, SOCK_STREAM, protocol);
     
     //If there are no errors spawn two threads R and S and declare data structures to store messages
     if(sockfd != -1){
@@ -69,8 +75,6 @@ int my_socket(int domain, int type, int protocol){
         Received_Message->messages = (char**)malloc(QUEUE_SIZE*sizeof(char*));
         Send_Message->lengths = (int*)malloc(QUEUE_SIZE*sizeof(int));
         Received_Message->lengths = (int*)malloc(QUEUE_SIZE*sizeof(int));
-        Send_Message->socket = (int*)malloc(QUEUE_SIZE*sizeof(int));
-        Received_Message->socket = (int*)malloc(QUEUE_SIZE*sizeof(int));
         Send_Message->left = 0;
         Send_Message->right = 0;
         Received_Message->left = 0;
@@ -78,10 +82,8 @@ int my_socket(int domain, int type, int protocol){
         for(int i=0; i<QUEUE_SIZE; i++){
             Send_Message->messages[i] = NULL;
             Send_Message->lengths[i] = 0;
-            Send_Message->socket[i] = 0;
             Received_Message->messages[i] = NULL;
             Received_Message->lengths[i] = 0;
-            Received_Message->socket[i] = 0;
         }
 
         //Spawn threads R and S
@@ -135,10 +137,8 @@ int my_close(int sockfd){
     }
     free(Send_Message->messages);
     free(Send_Message->lengths);
-    free(Send_Message->socket);
     free(Received_Message->messages);
     free(Received_Message->lengths);
-    free(Received_Message->socket);
     free(Send_Message);
     free(Received_Message);
     Send_Message = NULL;
@@ -155,7 +155,6 @@ int my_send(int sockfd, const void *buf, size_t len, int flags){    //The flags 
     Send_Message->messages[Send_Message->right] = (char*)malloc(len*sizeof(char));
     memcpy(Send_Message->messages[Send_Message->right], buf, len);
     Send_Message->lengths[Send_Message->right] = len;
-    Send_Message->socket[Send_Message->right] = sockfd;
     Send_Message->right = (Send_Message->right+1)%QUEUE_SIZE;
     return len;
 }
@@ -165,13 +164,19 @@ int my_recv(int sockfd, void *buf, size_t len, int flags){  //The flags are igno
     while(Received_Message->left == Received_Message->right){
         sleep(1);
     }
+    int length;
     //Read the message from the Received_Message and copy it to the buffer
     if(Received_Message->lengths[Received_Message->left] > len){
         memcpy(buf, Received_Message->messages[Received_Message->left], len);
+        length = len;
     }
     else{
         memcpy(buf, Received_Message->messages[Received_Message->left], Received_Message->lengths[Received_Message->left]);
+        length = Received_Message->lengths[Received_Message->left];
     }
-    
-
+    free(Received_Message->messages[Received_Message->left]);
+    Received_Message->messages[Received_Message->left] = NULL;
+    Received_Message->lengths[Received_Message->left] = 0;
+    Received_Message->left = (Received_Message->left+1)%QUEUE_SIZE;
+    return length;
 }
