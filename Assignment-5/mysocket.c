@@ -29,7 +29,7 @@ typedef struct {
 } Message_queue;
 
 //Since we are only dealing with one socket, we can use global variables
-int sockfd;
+int my_sockfd = 0;
 
 //We define Send_Message and Received_Message as global variables
 Message_queue *Send_Message, *Received_Message;
@@ -37,18 +37,28 @@ pthread_t R, S;
 
 void *R_thread(void *arg){
     //Receive messages from the network and put them in the Received_Message
+    while(!my_sockfd);
     while(1){
         //If the queue is not full, receive the message from the network
         //Read the first 4 bytes of the message to get the size of the message
         char* message = (char*) malloc(4*sizeof(char));
         int bytes_read = 0;
+        int flag = 0;
         while(bytes_read < 4){
-            int n = recv(sockfd, message+bytes_read, 4-bytes_read, 0);
-            if(n <= 0){
+            int n = recv(my_sockfd, message+bytes_read, 4-bytes_read, 0);
+            if(n < 0){
                 perror("recv");
                 exit(1);
             }
+            else if (n == 0){
+                flag = 1;
+                break;
+            }
             bytes_read += n;
+        }
+        if (flag) {
+            free(message);
+            continue;
         }
         int len = (message[0]<<24)|(message[1]<<16)|(message[2]<<8)|message[3];
         free(message);
@@ -57,12 +67,20 @@ void *R_thread(void *arg){
         bytes_read = 0;
         message = (char*) malloc(len*sizeof(char));
         while(bytes_read < len){
-            int n = recv(sockfd, message+bytes_read, len-bytes_read, 0);
-            if (n <= 0) {
+            int n = recv(my_sockfd, message+bytes_read, len-bytes_read, 0);
+            if (n < 0) {
                 perror("recv");
                 exit(1);
             }
+            else if (n == 0){
+                flag = 1;
+                break;
+            }
             bytes_read += n;
+        }
+        if (flag) {
+            free(message);
+            continue;
         }
         //If the queue is full, sleep for T seconds and try again
         if((Received_Message->right+1)%QUEUE_SIZE == Received_Message->left){
@@ -81,6 +99,7 @@ void *R_thread(void *arg){
 
 void *S_thread(void *arg){
     //Send messages from the Send_Message to the network
+    while(!my_sockfd);
     while(1){
         //If the queue is empty, sleep for T seconds and try again
         if(Send_Message->left == Send_Message->right){
@@ -95,22 +114,22 @@ void *S_thread(void *arg){
         message[1] = (len>>16)&0xFF;
         message[2] = (len>>8)&0xFF;
         message[3] = len&0xFF;
-        send(sockfd, message, 4, 0);
+        send(my_sockfd, message, 4, 0);
 
         //If the message is larger than MAX_PACKET_SIZE, split it into multiple packets
         //If the message is smaller than MAX_PACKET_SIZE, send it as it is
-        int len = Send_Message->lengths[Send_Message->left];
+        len = Send_Message->lengths[Send_Message->left];
         if(len > MAX_PACKET_SIZE){
             int num_packets = len/MAX_PACKET_SIZE;
             for(int i=0; i<num_packets; i++){
-                send(sockfd, Send_Message->messages[Send_Message->left]+i*MAX_PACKET_SIZE, MAX_PACKET_SIZE, 0);
+                send(my_sockfd, Send_Message->messages[Send_Message->left]+i*MAX_PACKET_SIZE, MAX_PACKET_SIZE, 0);
             }
             if(len%MAX_PACKET_SIZE != 0){
-                send(sockfd, Send_Message->messages[Send_Message->left]+num_packets*MAX_PACKET_SIZE, len%MAX_PACKET_SIZE, 0);
+                send(my_sockfd, Send_Message->messages[Send_Message->left]+num_packets*MAX_PACKET_SIZE, len%MAX_PACKET_SIZE, 0);
             }
         }
         else{
-            send(sockfd, Send_Message->messages[Send_Message->left], len, 0);
+            send(my_sockfd, Send_Message->messages[Send_Message->left], len, 0);
         }
         //Free the memory allocated for the message
         free(Send_Message->messages[Send_Message->left]);
@@ -136,7 +155,7 @@ int my_socket(int domain, int type, int protocol){
     }
 
     //Create a socket
-    sockfd = socket(domain, SOCK_STREAM, protocol);
+    int sockfd = socket(domain, SOCK_STREAM, protocol);
     
     //If there are no errors spawn two threads R and S and declare data structures to store messages
     if(sockfd != -1){
@@ -171,11 +190,13 @@ int my_bind(int sockfd, const struct sockaddr* addr, socklen_t addrlen){
 }
 
 int my_connect(int sockfd, const struct sockaddr* addr, socklen_t addrlen){
+    my_sockfd = sockfd;
     return connect(sockfd, addr, addrlen);
 }
 
 int my_accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen){
-    return accept(sockfd, addr, addrlen);
+    my_sockfd = accept(sockfd, addr, addrlen);
+    return my_sockfd;
 }
 
 int my_listen(int sockfd, int backlog){
@@ -215,10 +236,16 @@ int my_close(int sockfd){
     free(Received_Message);
     Send_Message = NULL;
     Received_Message = NULL;
+    my_sockfd = 0;
     return close(sockfd);
 }
 
 int my_send(int sockfd, const void *buf, size_t len, int flags){    //The flags are ignored
+    //Check if the socket is open
+    if(Send_Message==NULL){
+        errno = EBADF;
+        return -1;
+    }
     //Store the socket to be sent to and the message to be sent in the Send_Message, along with the length of the message
     //If the queue is full, sleep for 1 second and try again
     while(Send_Message->left == (Send_Message->right+1)%QUEUE_SIZE){
@@ -233,6 +260,11 @@ int my_send(int sockfd, const void *buf, size_t len, int flags){    //The flags 
 }
 
 int my_recv(int sockfd, void *buf, size_t len, int flags){  //The flags are ignored
+    //Check if the socket is open
+    if(Send_Message==NULL){
+        errno = EBADF;
+        return -1;
+    }
     //If the queue is empty, sleep for 1 second and try again
     while(Received_Message->left == Received_Message->right){
         sleep(1);
