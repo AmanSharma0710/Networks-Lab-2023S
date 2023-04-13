@@ -7,8 +7,6 @@
 #include<netdb.h>
 #include<string.h>
 
-
-
 int main(){
     char *buf;
     size_t len = 0;
